@@ -1,0 +1,17 @@
+{
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/",
+            "App\\Specific\\": "src/specific/"
+        },
+        "psr-0": {
+            "Legacy_": "legacy/"
+        },
+        "classmap": ["classmap/"]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "App\\Tests\\": "dev-tests/"
+        }
+    }
+}
