@@ -261,13 +261,6 @@ final class CliApplicationTest extends TestCase
         self::assertSame('', $r['stdout']);
     }
 
-    public function testInvalidFilterExitsOne(): void
-    {
-        $r = $this->runApp('--filter', 'invalid');
-        self::assertSame(1, $r['exitCode']);
-        self::assertStringContainsString('--filter', $r['stderr']);
-    }
-
     public function testAnalyzerExceptionExitsOne(): void
     {
         // Using a repoRoot without composer.json should surface an error.

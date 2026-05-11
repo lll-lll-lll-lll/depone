@@ -92,6 +92,18 @@ final class AutoloadResolverTest extends TestCase
         self::assertSame(self::$root . '/src/specific/SpecificFoo.php', $result);
     }
 
+    public function testPsr4MultipleDirectoriesResolveEarlierPath(): void
+    {
+        $result = self::$resolver->resolve('Multi\FromA');
+        self::assertSame(self::$root . '/multi-a/FromA.php', $result);
+    }
+
+    public function testPsr4MultipleDirectoriesResolveLaterPath(): void
+    {
+        $result = self::$resolver->resolve('Multi\FromB');
+        self::assertSame(self::$root . '/multi-b/FromB.php', $result);
+    }
+
     // -------------------------------------------------------------------------
     // PSR-0 resolution
     // -------------------------------------------------------------------------
@@ -187,10 +199,12 @@ final class AutoloadResolverTest extends TestCase
         self::assertArrayHasKey('App\\', $rules);
         self::assertArrayHasKey('App\\Specific\\', $rules);
         self::assertArrayHasKey('App\\Tests\\', $rules);
+        self::assertArrayHasKey('Multi\\', $rules);
 
-        self::assertSame(self::$root . '/src', $rules['App\\']);
-        self::assertSame(self::$root . '/src/specific', $rules['App\\Specific\\']);
-        self::assertSame(self::$root . '/dev-tests', $rules['App\\Tests\\']);
+        self::assertSame([self::$root . '/src'], $rules['App\\']);
+        self::assertSame([self::$root . '/src/specific'], $rules['App\\Specific\\']);
+        self::assertSame([self::$root . '/dev-tests'], $rules['App\\Tests\\']);
+        self::assertSame([self::$root . '/multi-a', self::$root . '/multi-b'], $rules['Multi\\']);
     }
 
     public function testGetPsr4RulesAreSortedByPrefixLengthDescending(): void

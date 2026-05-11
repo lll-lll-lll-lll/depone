@@ -97,6 +97,35 @@ PHP,
         );
     }
 
+    public function testRunDoesNotTreatHelperPhpUnderPsr4DirectoryAsAutoloaded(): void
+    {
+        $projectRoot = $this->getFixturePath('AnalyzerAutoloadCoverageProject');
+
+        $result = (new Analyzer($projectRoot))->run();
+
+        self::assertSame(
+            [
+                [
+                    'file' => 'tests/bootstrap.php',
+                    'line' => 5,
+                    'target' => 'dev-tests/TestSupport.php',
+                ],
+            ],
+            $result['redundant']
+        );
+        self::assertSame(
+            [
+                [
+                    'file' => 'public/index.php',
+                    'line' => 5,
+                    'target' => 'src/helpers.php',
+                ],
+            ],
+            $result['nonAutoloadRequireOnce']
+        );
+        self::assertSame([], $result['unresolved']);
+    }
+
     private function getFixturePath(string $name): string
     {
         $path = realpath(__DIR__ . '/Fixture/' . $name);

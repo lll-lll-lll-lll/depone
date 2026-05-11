@@ -11,10 +11,10 @@ use FilesystemIterator;
  */
 final class AutoloadResolver
 {
-    /** @var array<string, string> PSR-4 rules (prefix => directory) */
+    /** @var array<string, list<string>> PSR-4 rules (prefix => directories) */
     private array $psr4 = [];
 
-    /** @var array<string, string> PSR-0 rules (prefix => directory) */
+    /** @var array<string, list<string>> PSR-0 rules (prefix => directories) */
     private array $psr0 = [];
 
     /** @var array<string, string> classmap (class => file) */
@@ -87,7 +87,7 @@ final class AutoloadResolver
                 foreach ($autoload['psr-4'] as $prefix => $paths) {
                     $paths = is_array($paths) ? $paths : [$paths];
                     foreach ($paths as $path) {
-                        $this->psr4[$prefix] = $this->repoRoot . '/' . rtrim($path, '/');
+                        $this->psr4[$prefix][] = $this->repoRoot . '/' . rtrim($path, '/');
                     }
                 }
             }
@@ -97,7 +97,7 @@ final class AutoloadResolver
                 foreach ($autoload['psr-0'] as $prefix => $paths) {
                     $paths = is_array($paths) ? $paths : [$paths];
                     foreach ($paths as $path) {
-                        $this->psr0[$prefix] = $this->repoRoot . '/' . rtrim($path, '/');
+                        $this->psr0[$prefix][] = $this->repoRoot . '/' . rtrim($path, '/');
                     }
                 }
             }
@@ -125,13 +125,15 @@ final class AutoloadResolver
      */
     private function resolvePsr4(string $className): ?string
     {
-        foreach ($this->psr4 as $prefix => $dir) {
+        foreach ($this->psr4 as $prefix => $dirs) {
             if ($prefix === '' || str_starts_with($className, $prefix)) {
                 $relativeClass = $prefix === '' ? $className : substr($className, strlen($prefix));
-                $file = $dir . '/' . str_replace('\\', '/', $relativeClass) . '.php';
+                foreach ($dirs as $dir) {
+                    $file = $dir . '/' . str_replace('\\', '/', $relativeClass) . '.php';
 
-                if (file_exists($file)) {
-                    return $file;
+                    if (file_exists($file)) {
+                        return $file;
+                    }
                 }
             }
         }
@@ -144,21 +146,23 @@ final class AutoloadResolver
      */
     private function resolvePsr0(string $className): ?string
     {
-        foreach ($this->psr0 as $prefix => $dir) {
+        foreach ($this->psr0 as $prefix => $dirs) {
             if ($prefix === '' || str_starts_with($className, $prefix)) {
-                // In PSR-0, underscores in the class portion map to directories.
-                $lastNsPos = strrpos($className, '\\');
-                if ($lastNsPos !== false) {
-                    $namespace = substr($className, 0, $lastNsPos);
-                    $shortClass = substr($className, $lastNsPos + 1);
-                    $file = $dir . '/' . str_replace('\\', '/', $namespace) . '/'
-                        . str_replace('_', '/', $shortClass) . '.php';
-                } else {
-                    $file = $dir . '/' . str_replace('_', '/', $className) . '.php';
-                }
+                foreach ($dirs as $dir) {
+                    // In PSR-0, underscores in the class portion map to directories.
+                    $lastNsPos = strrpos($className, '\\');
+                    if ($lastNsPos !== false) {
+                        $namespace = substr($className, 0, $lastNsPos);
+                        $shortClass = substr($className, $lastNsPos + 1);
+                        $file = $dir . '/' . str_replace('\\', '/', $namespace) . '/'
+                            . str_replace('_', '/', $shortClass) . '.php';
+                    } else {
+                        $file = $dir . '/' . str_replace('_', '/', $className) . '.php';
+                    }
 
-                if (file_exists($file)) {
-                    return $file;
+                    if (file_exists($file)) {
+                        return $file;
+                    }
                 }
             }
         }
@@ -180,7 +184,7 @@ final class AutoloadResolver
     }
 
     /**
-     * Extracts class, interface, and trait names from a file.
+     * Extracts class, interface, trait, and enum names from a file.
      */
     private function scanFileForClasses(string $filePath): void
     {
@@ -214,8 +218,12 @@ final class AutoloadResolver
                 $namespace = trim($namespace);
             }
 
-            // Detect class/interface/trait declarations.
-            if (in_array($token[0], [T_CLASS, T_INTERFACE, T_TRAIT], true)) {
+            // Detect class/interface/trait/enum declarations.
+            $enumToken = defined('T_ENUM') ? T_ENUM : -1;
+            if (in_array($token[0], [T_CLASS, T_INTERFACE, T_TRAIT, $enumToken], true)) {
+                if ($token[0] === T_CLASS && $this->isAnonymousClass($tokens, $i)) {
+                    continue;
+                }
                 for ($j = $i + 1; $j < $count; $j++) {
                     if (is_array($tokens[$j]) && $tokens[$j][0] === T_STRING) {
                         $className = $tokens[$j][1];
@@ -226,6 +234,28 @@ final class AutoloadResolver
                 }
             }
         }
+    }
+
+    private function isAnonymousClass(array $tokens, int $classIndex): bool
+    {
+        for ($i = $classIndex - 1; $i >= 0; $i--) {
+            $token = $tokens[$i];
+            if (is_array($token)) {
+                if (in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                    continue;
+                }
+
+                return $token[0] === T_NEW;
+            }
+
+            if (trim($token) === '') {
+                continue;
+            }
+
+            return false;
+        }
+
+        return false;
     }
 
     /**

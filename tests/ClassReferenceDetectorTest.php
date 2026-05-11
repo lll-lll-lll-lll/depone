@@ -286,6 +286,21 @@ final class ClassReferenceDetectorTest extends TestCase
         self::assertSame([], $this->detectInNs($code));
     }
 
+    public function testUseStatementIsDetectedEvenWithoutRuntimeReference(): void
+    {
+        $code = 'use Other\Foo;';
+        self::assertSame(['Other\Foo'], $this->detectInNs($code));
+    }
+
+    public function testUseGroupStatementIsDetected(): void
+    {
+        $code = 'use Vendor\Package\{Foo, Bar as Baz};';
+        self::assertSame(
+            ['Vendor\Package\Bar', 'Vendor\Package\Foo'],
+            $this->detectInNs($code)
+        );
+    }
+
     // -------------------------------------------------------------------------
     // Namespace resolution
     // -------------------------------------------------------------------------

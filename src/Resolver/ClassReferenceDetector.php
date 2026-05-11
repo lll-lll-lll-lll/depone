@@ -52,6 +52,7 @@ final class ClassReferenceDetector
                 $uses = $this->parseUseStatement($tokens, $i, $tokenCount);
                 foreach ($uses as $alias => $fqcn) {
                     $useMap[$alias] = $fqcn;
+                    $references[] = $fqcn;
                 }
                 continue;
             }
@@ -233,6 +234,13 @@ final class ClassReferenceDetector
             }
 
             if ($token->text === '}') {
+                if ($current !== '') {
+                    $fqcn = ltrim($groupPrefix . $current, '\\');
+                    $shortName = $alias ?? $this->getShortName($fqcn);
+                    $uses[$shortName] = $fqcn;
+                }
+                $current = '';
+                $alias = null;
                 $inGroup = false;
                 continue;
             }

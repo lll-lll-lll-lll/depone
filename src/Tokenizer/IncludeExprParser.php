@@ -30,7 +30,7 @@ final class IncludeExprParser
 
         $cursor++;
         $argsTokens = [];
-        list($exprTokens, $cursor) = $this->extracted($cursor, $count, $tokens[$cursor], $argsTokens);
+        list($argsTokens, $cursor) = $this->extracted($cursor, $count, $tokens, $argsTokens);
 
         $args = TokenHelper::splitArgs($argsTokens);
         if (count($args) < 2) {
@@ -69,7 +69,7 @@ final class IncludeExprParser
         $firstToken = $tokens[$cursor] ?? null;
         if ($firstToken !== null && $firstToken->text === '(') {
             $cursor++;
-            list($exprTokens, $cursor) = $this->extracted($cursor, $count, $tokens[$cursor], $exprTokens);
+            list($exprTokens, $cursor) = $this->extracted($cursor, $count, $tokens, $exprTokens);
 
             return $exprTokens;
         }
@@ -100,15 +100,15 @@ final class IncludeExprParser
     /**
      * @param int $cursor
      * @param int $count
-     * @param Token $tokens Current token
+     * @param list<Token> $tokens Token list
      * @param array $exprTokens Collected expression tokens
      * @return array{0: array, 1: int}
      */
-    public function extracted(int $cursor, int $count, $tokens, array $exprTokens): array
+    public function extracted(int $cursor, int $count, array $tokens, array $exprTokens): array
     {
         $depth = 1;
         while ($cursor < $count) {
-            $token = $tokens;
+            $token = $tokens[$cursor];
             if ($token->text === '(') {
                 $depth++;
             } elseif ($token->text === ')') {
@@ -120,6 +120,6 @@ final class IncludeExprParser
             $exprTokens[] = $token;
             $cursor++;
         }
-        return array($exprTokens, $cursor);
+        return [$exprTokens, $cursor];
     }
 }

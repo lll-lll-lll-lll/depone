@@ -238,8 +238,8 @@ final class Analyzer
     }
 
     /**
-     * Collects PHP files registered in the autoload section of composer.json.
-     * Covers classmap, files, and psr-4 entries.
+     * Collects PHP files registered in the autoload/autoload-dev sections of composer.json.
+     * Covers classmap, files, psr-4, and psr-0 entries.
      *
      * @return array<string, true> Associative array keyed by absolute file path
      * @throws AnalyzerException
@@ -259,24 +259,38 @@ final class Analyzer
             throw new AnalyzerException("Failed to decode composer.json");
         }
 
-        $autoload = $composer['autoload'] ?? [];
-        if (!is_array($autoload)) {
-            $autoload = [];
+        $files = [];
+        $candidateFiles = [];
+
+        foreach (['autoload', 'autoload-dev'] as $sectionName) {
+            $autoload = $composer[$sectionName] ?? [];
+            if (!is_array($autoload)) {
+                continue;
+            }
+
+            // files: individual files
+            $this->collectFromFiles($autoload['files'] ?? [], $files);
+
+            // classmap: directories or individual files
+            $this->collectFromClassmap($autoload['classmap'] ?? [], $candidateFiles);
+
+            // psr-4: namespace => directory mapping
+            $this->collectFromPsr4($autoload['psr-4'] ?? [], $candidateFiles);
+
+            // psr-0: namespace => directory mapping (legacy)
+            $this->collectFromPsr4($autoload['psr-0'] ?? [], $candidateFiles);
         }
 
-        $files = [];
-
-        // classmap: directories or individual files
-        $this->collectFromClassmap($autoload['classmap'] ?? [], $files);
-
-        // files: individual files
-        $this->collectFromFiles($autoload['files'] ?? [], $files);
-
-        // psr-4: namespace => directory mapping
-        $this->collectFromPsr4($autoload['psr-4'] ?? [], $files);
-
-        // psr-0: namespace => directory mapping (legacy)
-        $this->collectFromPsr4($autoload['psr-0'] ?? [], $files);
+        $resolver = new AutoloadResolver($this->repoRoot);
+        foreach (array_keys($candidateFiles) as $filePath) {
+            foreach ($this->extractDeclaredClassNames($filePath) as $className) {
+                $resolved = $resolver->resolve($className);
+                if ($resolved !== null && PathHelper::normalize($resolved) === PathHelper::normalize($filePath)) {
+                    $files[PathHelper::normalize($filePath)] = true;
+                    break;
+                }
+            }
+        }
 
         return $files;
     }
@@ -370,6 +384,77 @@ final class Analyzer
         if (is_file($absolute)) {
             $files[$absolute] = true;
         }
+    }
+
+    /**
+     * @return array<string>
+     */
+    private function extractDeclaredClassNames(string $filePath): array
+    {
+        $content = file_get_contents($filePath);
+        if (!is_string($content)) {
+            return [];
+        }
+
+        $tokens = Token::tokenize($content);
+        $tokenCount = count($tokens);
+        $namespace = '';
+        $classNames = [];
+        $enumToken = defined('T_ENUM') ? T_ENUM : -1;
+
+        for ($i = 0; $i < $tokenCount; $i++) {
+            $token = $tokens[$i];
+            $id = TokenHelper::id($token);
+
+            if ($id === T_NAMESPACE) {
+                $namespace = '';
+                for ($j = $i + 1; $j < $tokenCount; $j++) {
+                    $nameToken = $tokens[$j];
+                    if ($nameToken->text === ';' || $nameToken->text === '{') {
+                        break;
+                    }
+                    if (TokenHelper::isNameToken(TokenHelper::id($nameToken))) {
+                        $namespace .= TokenHelper::text($nameToken);
+                    }
+                }
+                continue;
+            }
+
+            if (!in_array($id, [T_CLASS, T_INTERFACE, T_TRAIT, $enumToken], true)) {
+                continue;
+            }
+
+            if ($id === T_CLASS && $this->isAnonymousClassToken($tokens, $i)) {
+                continue;
+            }
+
+            for ($j = $i + 1; $j < $tokenCount; $j++) {
+                if (TokenHelper::id($tokens[$j]) === T_STRING) {
+                    $shortName = TokenHelper::text($tokens[$j]);
+                    $classNames[] = $namespace !== '' ? $namespace . '\\' . $shortName : $shortName;
+                    break;
+                }
+            }
+        }
+
+        return array_values(array_unique($classNames));
+    }
+
+    /**
+     * @param list<Token> $tokens
+     */
+    private function isAnonymousClassToken(array $tokens, int $classIndex): bool
+    {
+        for ($i = $classIndex - 1; $i >= 0; $i--) {
+            $id = TokenHelper::id($tokens[$i]);
+            if (in_array($id, [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                continue;
+            }
+
+            return $id === T_NEW;
+        }
+
+        return false;
     }
 
     /**
