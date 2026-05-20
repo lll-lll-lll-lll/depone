@@ -15,12 +15,8 @@ final class TokenHelper
     public const REASON_METHOD_CALL   = 'method_call';
     /** Unresolvable because the expression contains static access (`::`). */
     public const REASON_STATIC_ACCESS = 'static_access';
-    /** Unresolvable because the expression contains an unknown constant. */
-    public const REASON_UNKNOWN_CONST = 'unknown_const';
-    /** Unresolvable because the expression is too complex to classify above. */
+    /** Unresolvable because the expression could not be classified into any of the above categories. */
     public const REASON_COMPLEX       = 'complex';
-    /** Fallback used when no reason could be determined. */
-    public const REASON_UNKNOWN       = 'unknown';
 
     /**
      * Returns the token ID. For single-character tokens this is null.
@@ -169,7 +165,7 @@ final class TokenHelper
      * Classifies why a token list could not be resolved.
      *
      * @param list<Token> $tokens Token list
-     * @return string Reason (variable, method_call, static_access, unknown_const, complex)
+     * @return string Reason (variable, method_call, static_access, complex)
      */
     public static function classifyUnresolvableReason(array $tokens): string
     {
@@ -188,18 +184,6 @@ final class TokenHelper
             // Static access like Class::method() or Class::CONST is unresolved here.
             if ($id === T_DOUBLE_COLON) {
                 return self::REASON_STATIC_ACCESS;
-            }
-        }
-
-        // A constant-like token exists, but it could not be resolved.
-        foreach ($tokens as $token) {
-            $id = self::id($token);
-            if ($id === T_STRING) {
-                $text = self::text($token);
-                // Uppercase-leading identifiers are treated as likely constants.
-                if (ctype_upper($text[0])) {
-                    return self::REASON_UNKNOWN_CONST;
-                }
             }
         }
 

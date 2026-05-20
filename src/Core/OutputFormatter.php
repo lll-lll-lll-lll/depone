@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace RedundantRequireOnce\Core;
 
-use RedundantRequireOnce\Tokenizer\TokenHelper;
-
 /**
  * Formats analysis output.
  */
@@ -38,9 +36,7 @@ final class OutputFormatter
         $output .= PHP_EOL;
         $output .= "unresolved_include_require=" . count($result['unresolved']) . PHP_EOL;
         foreach ($result['unresolved'] as $row) {
-            $reason = $row['reason'] ?? TokenHelper::REASON_UNKNOWN;
-            $expr = $row['expr'] ?? '';
-            $output .= "  {$row['file']}:{$row['line']} [{$reason}] {$expr}" . PHP_EOL;
+            $output .= "  {$row['file']}:{$row['line']} [{$row['reason']}] {$row['expr']}" . PHP_EOL;
         }
 
         return $output;
