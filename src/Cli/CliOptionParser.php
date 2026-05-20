@@ -170,7 +170,7 @@ final class CliOptionParser
                     throw new CliOptionParseException("{$optionName} requires a value");
                 }
                 $rawValue = (string)$argv[$i + 1];
-                if (str_starts_with($rawValue, '-') && !ctype_digit(substr($rawValue, 1))) {
+                if (str_starts_with($rawValue, '-') && !self::isAllDigits(substr($rawValue, 1))) {
                     throw new CliOptionParseException("{$optionName} requires a value, got '{$rawValue}'");
                 }
                 return [$resultKey, $this->parseNonNegativeInt($rawValue, $optionName), $i + 1];
@@ -197,11 +197,19 @@ final class CliOptionParser
      */
     private function parseNonNegativeInt(string $value, string $optionName): int
     {
-        if (!ctype_digit($value)) {
+        if (!self::isAllDigits($value)) {
             throw new CliOptionParseException("{$optionName} requires a non-negative integer, got '{$value}'");
         }
 
         return (int)$value;
+    }
+
+    /**
+     * Returns true if the string is non-empty and consists only of ASCII digits 0-9.
+     */
+    private static function isAllDigits(string $value): bool
+    {
+        return $value !== '' && strspn($value, '0123456789') === strlen($value);
     }
 
     /**
