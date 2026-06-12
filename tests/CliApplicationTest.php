@@ -257,7 +257,7 @@ final class CliApplicationTest extends TestCase
     {
         $r = $this->runApp('--no-such-option');
         self::assertSame(1, $r['exitCode']);
-        self::assertStringContainsString('Unknown option', $r['stderr']);
+        self::assertStringContainsString('--no-such-option', $r['stderr']);
         self::assertSame('', $r['stdout']);
     }
 

@@ -3,4 +3,4 @@ parameters:
     paths:
         - src
         - bin
-    phpVersion: 80300
+    phpVersion: 80200
