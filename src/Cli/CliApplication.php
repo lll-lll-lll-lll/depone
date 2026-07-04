@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Depone\Internal\Cli;
 
+use Composer\InstalledVersions;
 use Symfony\Component\Console\Application;
 use Symfony\Component\Console\Input\ArgvInput;
 
@@ -45,7 +46,7 @@ final class CliApplication
     {
         $command = new FindRedundantCommand($this->repoRoot);
 
-        $app = new Application('depone');
+        $app = new Application('depone', InstalledVersions::getPrettyVersion('lll-lll-lll-lll/depone') ?? 'unknown');
         $app->addCommand($command);
         $app->setDefaultCommand(FindRedundantCommand::NAME, true);
         $app->setAutoExit(false);
