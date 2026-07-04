@@ -2,10 +2,22 @@
     "name": "lll-lll-lll-lll/depone",
     "description": "A static analysis tool for PHP that helps you eliminate require_once-related issues.",
     "type": "library",
+    "keywords": ["static analysis", "require-once", "autoload", "composer", "cli"],
+    "homepage": "https://github.com/lll-lll-lll-lll/require-once-lint",
     "license": "MIT",
+    "authors": [
+        {
+            "name": "lll-lll-lll-lll"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/lll-lll-lll-lll/require-once-lint/issues",
+        "source": "https://github.com/lll-lll-lll-lll/require-once-lint"
+    },
     "require": {
         "php": "^8.4",
-        "symfony/console": "^8.1"
+        "symfony/console": "^8.1",
+        "composer-runtime-api": "^2.1"
     },
     "require-dev": {
         "phpunit/phpunit": "^13.2",
