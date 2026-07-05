@@ -54,10 +54,21 @@ final class CliApplication
         ]));
         $app->setDefaultCommand(FindRedundantCommand::NAME, true);
         $app->setAutoExit(false);
+        $app->setCatchExceptions(false);
 
         $input  = new ArgvInput($argv);
         $output = new DualOutput($this->stdout, $this->stderr);
 
-        return $app->run($input, $output);
+        try {
+            return $app->run($input, $output);
+        } catch (\Throwable $e) {
+            // Invalid invocation (unknown option, ...) or an unexpected
+            // failure: both mean the analysis did not run, which is exit
+            // code 2 — distinct from exit code 1, "analysis ran and found
+            // something".
+            $app->renderThrowable($e, $output->getErrorOutput());
+
+            return FindRedundantCommand::EXIT_ERROR;
+        }
     }
 }

@@ -9,6 +9,16 @@ options, exit codes, and command output. PHP classes under `src/` are internal.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** exit codes now distinguish findings from failures, so depone
+  can gate CI. `0` = the analysis ran and found no redundant, fixable, or
+  conflicting require; `1` = at least one was reported (previously `0`);
+  `2` = the analysis could not run, including invalid invocations
+  (previously `1`). `unresolved_include_require` entries and `--trace` output
+  never affect the exit code. Use `vendor/bin/depone || true` for the old
+  report-only behavior.
+
 ## [0.2.1] - 2026-07-05
 
 ### Changed

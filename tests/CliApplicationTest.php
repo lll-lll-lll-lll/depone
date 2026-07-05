@@ -97,11 +97,30 @@ final class CliApplicationTest extends TestCase
     // Default text output
     // -------------------------------------------------------------------------
 
-    public function testDefaultTextOutputExitsZero(): void
+    public function testDefaultTextOutputExitsOneWhenFindingsExist(): void
     {
+        // The fixture contains one redundant require, so the run reports
+        // findings: exit code 1, nothing on stderr.
         $r = $this->runApp();
+        self::assertSame(1, $r['exitCode']);
+        self::assertSame('', $r['stderr']);
+    }
+
+    public function testExitsZeroWhenOnlyUnresolvedRequiresExist(): void
+    {
+        // CleanProject has no redundant/fixable/conflicting require, only a
+        // dynamic include. unresolved entries are reported but deliberately
+        // never affect the exit code.
+        $cleanRoot = realpath(__DIR__ . '/Fixture/CleanProject');
+        self::assertNotFalse($cleanRoot, 'CleanProject fixture not found');
+
+        $r = $this->runAppInRoot($cleanRoot);
         self::assertSame(0, $r['exitCode']);
         self::assertSame('', $r['stderr']);
+        self::assertStringContainsString('redundant_require_once=0', $r['stdout']);
+        self::assertStringContainsString('fixable_require_once=0', $r['stdout']);
+        self::assertStringContainsString('conflicting_require_once=0', $r['stdout']);
+        self::assertStringContainsString('unresolved_include_require=1', $r['stdout']);
     }
 
     public function testDefaultTextOutputContainsSummaryKeys(): void
@@ -139,7 +158,7 @@ final class CliApplicationTest extends TestCase
     public function testTextOutputClassifiesFixableAndConflictingRequires(): void
     {
         $r = $this->runAppInRoot(self::$classificationFixtureRoot);
-        self::assertSame(0, $r['exitCode']);
+        self::assertSame(1, $r['exitCode']);
         self::assertSame('', $r['stderr']);
 
         self::assertStringContainsString('redundant_require_once=1', $r['stdout']);
@@ -180,15 +199,15 @@ final class CliApplicationTest extends TestCase
     // Error cases
     // -------------------------------------------------------------------------
 
-    public function testUnknownOptionExitsOne(): void
+    public function testUnknownOptionExitsTwo(): void
     {
         $r = $this->runApp('--no-such-option');
-        self::assertSame(1, $r['exitCode']);
+        self::assertSame(2, $r['exitCode']);
         self::assertStringContainsString('--no-such-option', $r['stderr']);
         self::assertSame('', $r['stdout']);
     }
 
-    public function testAnalyzerExceptionExitsOne(): void
+    public function testAnalyzerExceptionExitsTwo(): void
     {
         // Using a repoRoot without composer.json should surface an error.
         $stdout = fopen('php://memory', 'r+');
@@ -204,7 +223,7 @@ final class CliApplicationTest extends TestCase
         fclose($stdout);
         fclose($stderr);
 
-        self::assertSame(1, $exitCode);
+        self::assertSame(2, $exitCode);
         self::assertNotSame('', $stderrContent);
     }
 }
