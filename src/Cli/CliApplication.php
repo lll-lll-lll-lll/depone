@@ -45,14 +45,12 @@ final class CliApplication
      */
     public function __invoke(array $argv): int
     {
-        $command = new FindRedundantCommand($this->repoRoot);
-
         $app = new Application('depone', InstalledVersions::getPrettyVersion('lll-lll-lll-lll/depone') ?? 'unknown');
         // Registered via a command loader rather than add()/addCommand():
         // add() was removed in symfony/console 8, addCommand() only exists
         // since 7.4, and this loader API is identical across 6.4-8.
         $app->setCommandLoader(new FactoryCommandLoader([
-            FindRedundantCommand::NAME => static fn (): FindRedundantCommand => $command,
+            FindRedundantCommand::NAME => fn (): FindRedundantCommand => new FindRedundantCommand($this->repoRoot),
         ]));
         $app->setDefaultCommand(FindRedundantCommand::NAME, true);
         $app->setAutoExit(false);
