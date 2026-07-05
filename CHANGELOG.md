@@ -9,18 +9,23 @@ options, exit codes, and command output. PHP classes under `src/` are internal.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-05
+
 ### Changed
 
 - The package is now published on Packagist as **`depone/depone`** (previously
   `lll-lll-lll-lll/depone`), and the repository was renamed to
   `lll-lll-lll-lll/depone`. Install with `composer require --dev depone/depone`;
   the old package name is abandoned in favor of the new one.
-
-### Changed
-
 - Lowered the minimum supported PHP version from 8.4 to 8.1, and widened the
   accepted symfony/console range to `^6.4 || ^7.0 || ^8.0`, so depone can be
   installed as a dev dependency in the legacy projects it is built for.
+
+### Fixed
+
+- The CLI no longer crashes on startup when installed under the new
+  `depone/depone` package name (the version lookup still queried the old
+  package name, which throws when that package is not installed).
 
 ## [0.2.0] - 2026-07-05
 
@@ -75,6 +80,7 @@ options, exit codes, and command output. PHP classes under `src/` are internal.
 - `--trace` option: show reverse caller traces (which files require the given
   file, and from which entrypoints).
 
-[Unreleased]: https://github.com/lll-lll-lll-lll/depone/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/lll-lll-lll-lll/depone/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/lll-lll-lll-lll/depone/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/lll-lll-lll-lll/depone/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/lll-lll-lll-lll/depone/releases/tag/v0.1.0
