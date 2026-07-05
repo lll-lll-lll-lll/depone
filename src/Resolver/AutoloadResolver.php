@@ -5,8 +5,6 @@ declare(strict_types=1);
 namespace Depone\Internal\Resolver;
 
 use Depone\Internal\Tokenizer\DeclaredClassExtractor;
-use FilesystemIterator;
-use SplFileInfo;
 
 /**
  * Resolves class names to file paths from Composer autoload settings.
@@ -207,17 +205,8 @@ final class AutoloadResolver
         // yields an empty rule set), so an unscannable classmap directory is
         // skipped rather than raised; the candidate collector reports it loudly.
         try {
-            $iterator = new \RecursiveIteratorIterator(
-                new \RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)
-            );
-
-            foreach ($iterator as $file) {
-                if (!$file instanceof SplFileInfo) {
-                    continue;
-                }
-                if ($file->isFile() && $file->getExtension() === 'php') {
-                    $this->scanFileForClasses($file->getPathname());
-                }
+            foreach (PhpFileFinder::findPhpFiles($dir) as $filePath) {
+                $this->scanFileForClasses($filePath);
             }
         } catch (\UnexpectedValueException) {
             return;

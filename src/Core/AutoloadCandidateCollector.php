@@ -4,13 +4,10 @@ declare(strict_types=1);
 
 namespace Depone\Internal\Core;
 
-use FilesystemIterator;
-use RecursiveDirectoryIterator;
-use RecursiveIteratorIterator;
 use Depone\Internal\Exception\AnalyzerException;
 use Depone\Internal\Resolver\ComposerAutoloadConfig;
+use Depone\Internal\Resolver\PhpFileFinder;
 use Depone\Internal\Tokenizer\PathHelper;
-use SplFileInfo;
 
 /**
  * Collects the candidate autoload file set (psr-4/psr-0/classmap entries) and the
@@ -134,14 +131,8 @@ final class AutoloadCandidateCollector
     {
         if (is_dir($absolute)) {
             try {
-                $iterator = new RecursiveIteratorIterator(
-                    new RecursiveDirectoryIterator($absolute, FilesystemIterator::SKIP_DOTS)
-                );
-                foreach ($iterator as $info) {
-                    /** @var SplFileInfo $info */
-                    if ($info->isFile() && strtolower($info->getExtension()) === 'php') {
-                        $files[PathHelper::normalize((string)$info->getPathname())] = true;
-                    }
+                foreach (PhpFileFinder::findPhpFiles($absolute) as $path) {
+                    $files[PathHelper::normalize($path)] = true;
                 }
             } catch (\UnexpectedValueException $e) {
                 // An unreadable directory (or one deleted mid-scan) raises
