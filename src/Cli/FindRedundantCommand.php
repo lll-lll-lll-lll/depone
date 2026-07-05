@@ -33,7 +33,7 @@ final class FindRedundantCommand extends Command
     {
         $this
             ->setName(self::NAME)
-            ->setDescription('Detect redundant require_once statements for files already covered by Composer autoload.')
+            ->setDescription('Classify require_once statements by their relationship to Composer autoload (redundant, fixable, conflicting).')
             ->addOption('trace', null, InputOption::VALUE_REQUIRED, 'Show reverse caller traces for the given file path (repo relative) — who requires this file?');
     }
 
