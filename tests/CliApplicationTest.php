@@ -95,6 +95,16 @@ final class CliApplicationTest extends TestCase
         self::assertStringContainsString('Usage:', $r['stdout']);
     }
 
+    public function testHelpFlagWithSubcommandShowsThatSubcommandsHelp(): void
+    {
+        // `depone --help doctor` must display help for `doctor`, not be hijacked
+        // into the default command's help by the default-command routing.
+        $r = $this->runApp('--help', 'doctor');
+        self::assertSame(0, $r['exitCode']);
+        self::assertStringContainsString('Report files the Composer autoloader can never reach.', $r['stdout']);
+        self::assertStringNotContainsString('Detect redundant require_once', $r['stdout']);
+    }
+
     // -------------------------------------------------------------------------
     // Default text output
     // -------------------------------------------------------------------------

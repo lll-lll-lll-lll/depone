@@ -64,7 +64,7 @@ final class CliApplication
      * value (e.g. `--trace src/Bar.php`) apart from a command name when the
      * default command is invoked implicitly. Make routing unambiguous by
      * prepending the default command name whenever the first token is neither
-     * an option nor an already-known command name.
+     * an already-known command name nor an application-level flag.
      *
      * @param list<string> $argv
      * @return list<string>
@@ -72,10 +72,22 @@ final class CliApplication
     private function routeToDefaultCommand(Application $app, array $argv): array
     {
         $first = $argv[1] ?? null;
+
+        // Application-level help/version flags must reach the Application layer so
+        // it can list the subcommands (including `doctor`) or print the version,
+        // rather than being routed into — and consumed by — the default command.
+        if ($first !== null && in_array($first, ['-h', '--help', '-V', '--version'], true)) {
+            return $argv;
+        }
+
+        // An explicit, known command name (e.g. `doctor`, `list`) is left untouched.
         if ($first !== null && $first !== '' && $first[0] !== '-' && $app->has($first)) {
             return $argv;
         }
 
+        // Everything else — no arguments, or a default-command option such as
+        // `--trace <value>` whose value must not be mistaken for a command name —
+        // is routed explicitly to the default command.
         return [$argv[0], FindRedundantCommand::NAME, ...array_slice($argv, 1)];
     }
 }
