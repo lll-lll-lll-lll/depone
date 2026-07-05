@@ -10,6 +10,8 @@ namespace Depone\Internal\Core;
  * @phpstan-import-type AnalysisResult from \Depone\Internal\Core\Analyzer
  * @phpstan-import-type TraceResult from \Depone\Internal\Core\DependencyGraph
  * @phpstan-import-type TracePath from \Depone\Internal\Core\DependencyGraph
+ * @phpstan-import-type DoctorFinding from \Depone\Internal\Core\AutoloadDoctor
+ * @phpstan-import-type DoctorResult from \Depone\Internal\Core\AutoloadDoctor
  *
  * @internal
  */
@@ -51,6 +53,42 @@ final class OutputFormatter
         $output .= $this->formatPaths($trace['paths']);
         if ($trace['truncated']) {
             $output .= "  (trace path list truncated)" . PHP_EOL;
+        }
+
+        return $output;
+    }
+
+    /**
+     * Formats doctor diagnosis output.
+     *
+     * Three fixed sections (errors, warnings, info) are printed in that order,
+     * each with a `key=count` header followed by indented `file: detail` lines.
+     *
+     * @param DoctorResult $result
+     * @param 'error'|'warning'|null $minSeverity Lowest severity section to include; null includes all sections.
+     */
+    public function formatDoctor(array $result, ?string $minSeverity = null): string
+    {
+        $sections = [];
+        $sections[] = $this->formatDoctorSection('autoload_unreachable_errors', $result['errors']);
+        if ($minSeverity !== 'error') {
+            $sections[] = $this->formatDoctorSection('autoload_unreachable_warnings', $result['warnings']);
+        }
+        if ($minSeverity === null) {
+            $sections[] = $this->formatDoctorSection('autoload_unreachable_info', $result['info']);
+        }
+
+        return implode(PHP_EOL, $sections);
+    }
+
+    /**
+     * @param list<DoctorFinding> $findings
+     */
+    private function formatDoctorSection(string $label, array $findings): string
+    {
+        $output = "{$label}=" . count($findings) . PHP_EOL;
+        foreach ($findings as $finding) {
+            $output .= "  {$finding['file']}: {$finding['detail']}" . PHP_EOL;
         }
 
         return $output;

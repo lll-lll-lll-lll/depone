@@ -16,16 +16,23 @@ use Depone\Internal\Cli\CliApplication;
  *   - public/index.php            : redundant require_once (src/Bar.php, a PSR-4 target)
  *   - public/index-with-const.php : unresolvable require_once (undefined constant), reason "complex"
  *   - src/Bar.php                 : PSR-4 autoload target
+ * Fixture: tests/Fixture/DoctorProject/ (see AutoloadDoctorTest for the reason breakdown)
+ *   Used by the `doctor` subcommand tests below.
  */
 final class CliApplicationTest extends TestCase
 {
     private static string $fixtureRoot;
+    private static string $doctorFixtureRoot;
 
     public static function setUpBeforeClass(): void
     {
         $path = realpath(__DIR__ . '/Fixture/CliApplicationProject');
         self::assertNotFalse($path, 'CliApplicationProject fixture not found');
         self::$fixtureRoot = $path;
+
+        $doctorPath = realpath(__DIR__ . '/Fixture/DoctorProject');
+        self::assertNotFalse($doctorPath, 'DoctorProject fixture not found');
+        self::$doctorFixtureRoot = $doctorPath;
     }
 
     // -------------------------------------------------------------------------
@@ -39,12 +46,22 @@ final class CliApplicationTest extends TestCase
      */
     private function runApp(string ...$args): array
     {
+        return $this->runAppInRoot(self::$fixtureRoot, ...$args);
+    }
+
+    /**
+     * Runs CliApplication against the given repo root and returns stdout, stderr, and the exit code.
+     *
+     * @return array{exitCode: int, stdout: string, stderr: string}
+     */
+    private function runAppInRoot(string $repoRoot, string ...$args): array
+    {
         $stdout = fopen('php://memory', 'r+');
         $stderr = fopen('php://memory', 'r+');
         self::assertNotFalse($stdout);
         self::assertNotFalse($stderr);
 
-        $exitCode = (new CliApplication($stdout, $stderr, self::$fixtureRoot))(['bin', ...$args]);
+        $exitCode = (new CliApplication($stdout, $stderr, $repoRoot))(['bin', ...$args]);
 
         rewind($stdout);
         rewind($stderr);
@@ -124,6 +141,47 @@ final class CliApplicationTest extends TestCase
         self::assertStringContainsString('trace_target=src/Bar.php', $r['stdout']);
         self::assertStringContainsString('direct_callers=', $r['stdout']);
         self::assertStringContainsString('public/index.php', $r['stdout']);
+    }
+
+    // -------------------------------------------------------------------------
+    // doctor subcommand
+    // -------------------------------------------------------------------------
+
+    public function testDoctorExitsZeroAndPrintsAllThreeSections(): void
+    {
+        $r = $this->runAppInRoot(self::$doctorFixtureRoot, 'doctor');
+        self::assertSame(0, $r['exitCode']);
+        self::assertSame('', $r['stderr']);
+        self::assertStringContainsString('autoload_unreachable_errors=2', $r['stdout']);
+        self::assertStringContainsString('autoload_unreachable_warnings=1', $r['stdout']);
+        self::assertStringContainsString('autoload_unreachable_info=1', $r['stdout']);
+        self::assertStringContainsString('src/Dup.php: App\Dup is shadowed by classmap/Dup.php', $r['stdout']);
+    }
+
+    public function testDoctorMinSeverityErrorPrintsOnlyErrorsSection(): void
+    {
+        $r = $this->runAppInRoot(self::$doctorFixtureRoot, 'doctor', '--min-severity=error');
+        self::assertSame(0, $r['exitCode']);
+        self::assertStringContainsString('autoload_unreachable_errors=2', $r['stdout']);
+        self::assertStringNotContainsString('autoload_unreachable_warnings=', $r['stdout']);
+        self::assertStringNotContainsString('autoload_unreachable_info=', $r['stdout']);
+    }
+
+    public function testDoctorMinSeverityWarningPrintsErrorsAndWarningsSections(): void
+    {
+        $r = $this->runAppInRoot(self::$doctorFixtureRoot, 'doctor', '--min-severity=warning');
+        self::assertSame(0, $r['exitCode']);
+        self::assertStringContainsString('autoload_unreachable_errors=2', $r['stdout']);
+        self::assertStringContainsString('autoload_unreachable_warnings=1', $r['stdout']);
+        self::assertStringNotContainsString('autoload_unreachable_info=', $r['stdout']);
+    }
+
+    public function testDoctorInvalidMinSeverityExitsOne(): void
+    {
+        $r = $this->runAppInRoot(self::$doctorFixtureRoot, 'doctor', '--min-severity=bogus');
+        self::assertSame(1, $r['exitCode']);
+        self::assertStringContainsString('bogus', $r['stderr']);
+        self::assertSame('', $r['stdout']);
     }
 
     // -------------------------------------------------------------------------

@@ -48,12 +48,34 @@ final class CliApplication
 
         $app = new Application('depone', InstalledVersions::getPrettyVersion('lll-lll-lll-lll/depone') ?? 'unknown');
         $app->addCommand($command);
-        $app->setDefaultCommand(FindRedundantCommand::NAME, true);
+        $app->addCommand(new DoctorCommand($this->repoRoot));
+        $app->setDefaultCommand(FindRedundantCommand::NAME, false);
         $app->setAutoExit(false);
 
-        $input  = new ArgvInput($argv);
+        $input  = new ArgvInput($this->routeToDefaultCommand($app, $argv));
         $output = new DualOutput($this->stdout, $this->stderr);
 
         return $app->run($input, $output);
+    }
+
+    /**
+     * With subcommands registered, `setDefaultCommand(..., false)` is required so
+     * they are reachable, but it means Symfony can no longer tell an option's
+     * value (e.g. `--trace src/Bar.php`) apart from a command name when the
+     * default command is invoked implicitly. Make routing unambiguous by
+     * prepending the default command name whenever the first token is neither
+     * an option nor an already-known command name.
+     *
+     * @param list<string> $argv
+     * @return list<string>
+     */
+    private function routeToDefaultCommand(Application $app, array $argv): array
+    {
+        $first = $argv[1] ?? null;
+        if ($first !== null && $first !== '' && $first[0] !== '-' && $app->has($first)) {
+            return $argv;
+        }
+
+        return [$argv[0], FindRedundantCommand::NAME, ...array_slice($argv, 1)];
     }
 }

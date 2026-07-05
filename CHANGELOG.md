@@ -9,6 +9,17 @@ options, exit codes, and command output. PHP classes under `src/` are internal.
 
 ## [Unreleased]
 
+### Added
+
+- `doctor` subcommand: reports files and classes that the Composer autoloader
+  can never reach — classes shadowed by another autoload winner
+  (`resolved_elsewhere`), classes whose namespace maps to a path that does not
+  exist (`expected_path_missing`), classes matching no autoload rule
+  (`no_matching_rule`), and candidate files that declare no types
+  (`no_declarations`). Findings are grouped into `error`/`warning`/`info`
+  sections; the `--min-severity=error|warning` option limits output to the
+  higher-severity sections. Text output only; always exits 0.
+
 ## [0.1.0] - 2026-07-04
 
 ### Added
