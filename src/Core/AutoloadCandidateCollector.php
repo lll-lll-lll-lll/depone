@@ -151,18 +151,26 @@ final class AutoloadCandidateCollector
      * Collects PHP files from the given path, whether it is a file or directory.
      *
      * @param array<string, true> $files Destination array, passed by reference
+     * @throws AnalyzerException When a directory registered in composer.json cannot be scanned
      */
     private function collectPhpFilesFromPath(string $absolute, array &$files): void
     {
         if (is_dir($absolute)) {
-            $iterator = new RecursiveIteratorIterator(
-                new RecursiveDirectoryIterator($absolute, FilesystemIterator::SKIP_DOTS)
-            );
-            foreach ($iterator as $info) {
-                /** @var SplFileInfo $info */
-                if ($info->isFile() && strtolower($info->getExtension()) === 'php') {
-                    $files[PathHelper::normalize((string)$info->getPathname())] = true;
+            try {
+                $iterator = new RecursiveIteratorIterator(
+                    new RecursiveDirectoryIterator($absolute, FilesystemIterator::SKIP_DOTS)
+                );
+                foreach ($iterator as $info) {
+                    /** @var SplFileInfo $info */
+                    if ($info->isFile() && strtolower($info->getExtension()) === 'php') {
+                        $files[PathHelper::normalize((string)$info->getPathname())] = true;
+                    }
                 }
+            } catch (\UnexpectedValueException $e) {
+                // An unreadable directory (or one deleted mid-scan) raises
+                // UnexpectedValueException from the directory iterator; surface it
+                // through the normal error path instead of crashing the command.
+                throw new AnalyzerException("Failed to scan directory: {$absolute} ({$e->getMessage()})");
             }
             return;
         }

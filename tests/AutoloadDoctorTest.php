@@ -169,4 +169,37 @@ final class AutoloadDoctorTest extends TestCase
             rmdir($tmpDir);
         }
     }
+
+    public function testUnreadableAutoloadDirectoryThrowsAnalyzerException(): void
+    {
+        $tmpDir = sys_get_temp_dir() . '/autoload_doctor_test_' . uniqid('', true);
+        mkdir($tmpDir . '/locked', 0777, true);
+        file_put_contents(
+            $tmpDir . '/composer.json',
+            '{"autoload": {"classmap": ["locked/"]}}'
+        );
+        chmod($tmpDir . '/locked', 0o000);
+
+        // As root the permission bits are bypassed and the scenario cannot occur.
+        $handle = @opendir($tmpDir . '/locked');
+        if ($handle !== false) {
+            closedir($handle);
+            chmod($tmpDir . '/locked', 0o755);
+            rmdir($tmpDir . '/locked');
+            unlink($tmpDir . '/composer.json');
+            rmdir($tmpDir);
+            self::markTestSkipped('requires a non-root user for an unreadable directory');
+        }
+
+        try {
+            $this->expectException(AnalyzerException::class);
+            $this->expectExceptionMessageMatches('/Failed to scan directory/');
+            (new AutoloadDoctor($tmpDir))->run();
+        } finally {
+            chmod($tmpDir . '/locked', 0o755);
+            rmdir($tmpDir . '/locked');
+            unlink($tmpDir . '/composer.json');
+            rmdir($tmpDir);
+        }
+    }
 }

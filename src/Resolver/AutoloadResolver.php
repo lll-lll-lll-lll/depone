@@ -263,17 +263,24 @@ final class AutoloadResolver
 
     private function scanDirectoryForClasses(string $dir): void
     {
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)
-        );
+        // The resolver is tolerant by contract (a missing composer.json already
+        // yields an empty rule set), so an unscannable classmap directory is
+        // skipped rather than raised; the candidate collector reports it loudly.
+        try {
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)
+            );
 
-        foreach ($iterator as $file) {
-            if (!$file instanceof SplFileInfo) {
-                continue;
+            foreach ($iterator as $file) {
+                if (!$file instanceof SplFileInfo) {
+                    continue;
+                }
+                if ($file->isFile() && $file->getExtension() === 'php') {
+                    $this->scanFileForClasses($file->getPathname());
+                }
             }
-            if ($file->isFile() && $file->getExtension() === 'php') {
-                $this->scanFileForClasses($file->getPathname());
-            }
+        } catch (\UnexpectedValueException) {
+            return;
         }
     }
 
