@@ -210,20 +210,8 @@ final class CliApplicationTest extends TestCase
     public function testAnalyzerExceptionExitsTwo(): void
     {
         // Using a repoRoot without composer.json should surface an error.
-        $stdout = fopen('php://memory', 'r+');
-        $stderr = fopen('php://memory', 'r+');
-        self::assertNotFalse($stdout);
-        self::assertNotFalse($stderr);
-
-        $noComposerDir = __DIR__ . '/Fixture'; // directory without composer.json
-        $exitCode = (new CliApplication($stdout, $stderr, $noComposerDir))(['bin']);
-
-        rewind($stderr);
-        $stderrContent = stream_get_contents($stderr);
-        fclose($stdout);
-        fclose($stderr);
-
-        self::assertSame(2, $exitCode);
-        self::assertNotSame('', $stderrContent);
+        $r = $this->runAppInRoot(__DIR__ . '/Fixture');
+        self::assertSame(2, $r['exitCode']);
+        self::assertNotSame('', $r['stderr']);
     }
 }

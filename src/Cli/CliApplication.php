@@ -41,11 +41,21 @@ final class CliApplication
      * Runs the CLI and returns an exit code.
      *
      * @param list<string> $argv Command-line arguments
-     * @return int Exit code (0 = success, 1 = error)
+     * @return int Exit code (0 = no findings, 1 = findings reported,
+     *             2 = the analysis could not run)
      */
     public function __invoke(array $argv): int
     {
-        $app = new Application('depone', InstalledVersions::getPrettyVersion('depone/depone') ?? 'unknown');
+        try {
+            // Returns null (not a throw) when the package is installed but
+            // replaced/provided; the throw happens when the name is absent
+            // entirely — a renamed fork or a non-Composer vendored copy.
+            $version = InstalledVersions::getPrettyVersion('depone/depone') ?? 'unknown';
+        } catch (\OutOfBoundsException) {
+            $version = 'unknown';
+        }
+
+        $app = new Application('depone', $version);
         // Registered via a command loader rather than add()/addCommand():
         // add() was removed in symfony/console 8, addCommand() only exists
         // since 7.4, and this loader API is identical across 6.4-8.

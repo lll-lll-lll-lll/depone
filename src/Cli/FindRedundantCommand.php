@@ -71,17 +71,18 @@ final class FindRedundantCommand extends Command
             }
 
             $this->writeRaw($output, $formatter->formatSummary($result));
+
+            // unresolved entries are reported but deliberately do not affect
+            // the exit code: legacy dynamic includes are often legitimate, and
+            // failing on them would make the first run red on almost every
+            // legacy project.
+            $hasFindings = $result['redundant'] !== [] || $result['fixable'] !== [] || $result['conflicting'] !== [];
+
+            return $hasFindings ? self::EXIT_FINDINGS : self::EXIT_OK;
         } catch (AnalyzerException $e) {
             $errOutput->writeln($e->getMessage());
             return self::EXIT_ERROR;
         }
-
-        // unresolved entries are reported but deliberately do not affect the
-        // exit code: legacy dynamic includes are often legitimate, and failing
-        // on them would make the first run red on almost every legacy project.
-        $hasFindings = $result['redundant'] !== [] || $result['fixable'] !== [] || $result['conflicting'] !== [];
-
-        return $hasFindings ? self::EXIT_FINDINGS : self::EXIT_OK;
     }
 
     /**

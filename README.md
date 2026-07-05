@@ -154,7 +154,15 @@ redundant, fixable, or conflicting require appears:
 - run: vendor/bin/depone
 ```
 
-To print the report without failing the build, use `vendor/bin/depone || true`.
+To print the report without failing the build on findings, use:
+
+```sh
+vendor/bin/depone || [ $? -ne 2 ]
+```
+
+This ignores findings (exit `1`) but still fails the step when the analysis
+could not run at all (exit `2`). A plain `|| true` would mask execution errors
+too — the step would stay green even when no analysis happened.
 
 ## How it works
 
