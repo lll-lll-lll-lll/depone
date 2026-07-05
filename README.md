@@ -14,9 +14,12 @@ issues.
 
 Legacy PHP projects accumulate `require_once` statements over the years. After
 Composer autoload is introduced, many of them become redundant — but judging
-which ones by hand is impractical. `depone` tokenizes every PHP file in the
-repository, statically resolves each `require_once` target, and reports the
-ones whose targets Composer already autoloads.
+which ones by hand is impractical. `depone` reads every PHP file in the
+repository, statically resolves each `require_once` target, and classifies it
+by its relationship to Composer autoload. It reports not only the requires that
+are already autoloaded and safe to delete, but also the ones that *should* be
+autoloaded and aren't (a broken autoload config), and the ones that load a copy
+Composer autoloads from somewhere else (a shadowed definition).
 
 `depone` is a CLI tool. Its supported public interface is the command name,
 options, exit codes, and command output. PHP classes under `src/` are internal
@@ -46,12 +49,31 @@ redundant_require_once=2
 public/index.php:5 => src/Foo.php
 src/Legacy/Bootstrap.php:12 => src/Util/Path.php
 
+fixable_require_once=1
+  src/Legacy/Bootstrap.php:9 => src/Domain/Order.php  (App\Domain\Order would load from src/Domain/Orders.php — fix autoload, then remove this require)
+
+conflicting_require_once=1
+  public/index.php:6 => src/Vendored/Logger.php  (App\Logger is autoloaded from vendor-copy/Logger.php — this require loads a shadowed copy)
+
 unresolved_include_require=1
   public/plugin.php:8 [variable] $pluginDir . '/init.php'
 ```
 
-Each redundant line means: the file at `file:line` has a `require_once` whose
-target is already autoloadable, so the statement can likely be removed.
+Each `require_once` whose target resolves statically falls into one of four
+categories:
+
+| Section | Meaning | What to do |
+| --- | --- | --- |
+| `redundant_require_once` | The target is already autoloaded, and deleting the require provably changes nothing. | Delete the require. |
+| `fixable_require_once` | The target declares a class that matches a PSR-4/PSR-0 rule, but the rule derives a path that does not exist — so it never autoloads. | Fix the autoload config, then delete the require. |
+| `conflicting_require_once` | The target declares a class that Composer autoloads from a *different* file. Deleting the require would change which definition loads. | Investigate the shadowed copy before touching the require. |
+| *(none — silent)* | The target is legitimately not autoloadable: no matching rule, it declares no types, or it also defines functions/constants or runs top-level code. | Leave it; the require is load-bearing. |
+
+A require is only ever called `redundant` when deleting it is provably safe:
+the target is an eager `autoload.files` entry, or it declares nothing but
+class-like types (no functions, constants, or side effects) and *every* class
+it declares autoloads back to that same file. `fixable` and `conflicting` are
+flagged but never presented as free deletions.
 
 Include/require statements whose path expression cannot be resolved statically
 are never silently skipped — they are listed under
@@ -104,21 +126,27 @@ echo $greeting->say();
 Running `depone` from the project root:
 
 ```
-redundant_require_once=3
+redundant_require_once=2
 public/index.php:4 => src/Greeting.php
 public/index.php:5 => src/Legacy/Mailer.php
-public/index.php:6 => src/helpers.php
+
+fixable_require_once=0
+
+conflicting_require_once=0
 
 unresolved_include_require=1
   public/index.php:7 [variable] $config['plugins_dir'] . '/bootstrap.php'
 ```
 
-Lines 4–6 are already covered by Composer's autoloader, so they can be
-deleted. Line 7 builds its path from a variable, so `depone` cannot resolve it
-statically — it is reported as unresolved rather than silently ignored, and
-is excluded from the redundant list. The `require_once` for
-`vendor/autoload.php` on line 3 is never reported: it isn't part of the
-autoloadable set itself, and its target is resolvable but not redundant.
+Lines 4–5 declare classes that Composer already autoloads back to those same
+files, so they can be deleted. Line 6 (`src/helpers.php`) is *not* reported:
+it defines helper functions rather than a class, so autoload never covers it
+and the require is load-bearing. Line 7 builds its path from a variable, so
+`depone` cannot resolve it statically — it is reported as unresolved rather
+than silently ignored, and is excluded from the redundant list. The
+`require_once` for `vendor/autoload.php` on line 3 is never reported: it isn't
+part of the autoloadable set itself, and its target is resolvable but not
+redundant.
 
 Before deleting the `require_once` for `Mailer.php`, confirm who else depends
 on it:
@@ -137,30 +165,44 @@ trace_paths=1
   1. public/index.php -[r]-> src/Legacy/Mailer.php
 ```
 
-With a single caller and a clear trace path, the three lines can be removed
-safely and left to Composer's autoloader.
+With a single caller and a clear trace path, the two redundant lines can be
+removed safely and left to Composer's autoloader.
 
 ## How it works
 
-1. Collects the set of autoloadable files from `composer.json` (`psr-4`,
-   `psr-0`, `classmap`, and `files`, including `autoload-dev`). For PSR rules,
-   a file only counts when a class it declares actually resolves back to that
-   file.
-2. Tokenizes every PHP file (excluding `vendor/` and `.git/`) with
-   `token_get_all()` and evaluates each require/include path expression with a
-   small static evaluator: string literals, concatenation,
-   `__DIR__`/`__FILE__`, `define()`'d constants, and `dirname()` calls.
-3. Reports a `require_once` as redundant when its resolved target is in the
-   autoloadable set.
+1. Reads the autoload rules from `composer.json` (`psr-4`, `psr-0`, `classmap`,
+   and `files`, including their `autoload-dev` counterparts).
+2. Finds every require/include (excluding `vendor/` and `.git/`) by tokenizing
+   each file with `token_get_all()`, and evaluates the path expression with a
+   small static evaluator: string literals, concatenation, `__DIR__`/`__FILE__`,
+   `define()`'d constants, and `dirname()` calls. Expressions it cannot resolve
+   are reported as `unresolved_include_require` rather than dropped.
+3. For each resolved `require_once` target, parses the file with
+   [nikic/php-parser](https://github.com/nikic/PHP-Parser) to find the
+   class-like types it declares, and checks each declared class against the
+   autoload rules from step 1:
+   - **redundant** — the target is an eager `autoload.files` entry, or it
+     declares nothing but types and *every* declared class resolves back to
+     that same file. Deleting it is provably safe.
+   - **fixable** — a declared class matches a PSR rule, but the rule derives a
+     path that does not exist, so it never autoloads.
+   - **conflicting** — a declared class autoloads from a *different* file, so
+     the require loads a shadowed copy.
+   - otherwise the require is left unreported (no matching rule, no declared
+     types, or the file also defines functions/constants or runs top-level
+     code — autoload would not reproduce those, so the require is load-bearing).
 
 ## Relationship to PHPStan and Rector
 
 depone isn't a replacement for PHPStan, Psalm, or Rector — use it alongside
-them. It covers one narrow thing they don't have a rule for: deciding whether
-a `require_once` is made redundant by Composer autoload. That decision is a
+them. It covers one narrow thing they don't have a rule for: relating each
+`require_once` to Composer autoload — is the target already autoloaded, should
+it be but isn't, or does it shadow an autoloaded copy? That is a
 path-resolution + autoload-matching problem rather than an AST transformation,
-which is why it lives as a small standalone tool. It is also report-only by
-design and never rewrites your code.
+which is why it lives as a small standalone tool. `composer dump-autoload
+--strict-psr`/`--strict-ambiguous` validates the autoload config on its own,
+but never parses source-level `require_once` statements, so it cannot make this
+connection. depone is also report-only by design and never rewrites your code.
 
 ## Development
 
