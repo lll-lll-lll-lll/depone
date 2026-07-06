@@ -253,7 +253,17 @@ final class OutputFormatter
             ] : [],
         ];
 
-        $json = json_encode($document, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        // JSON_INVALID_UTF8_SUBSTITUTE is load-bearing for the exit-code
+        // contract: legacy repos legitimately carry non-UTF-8 bytes in file
+        // paths (Linux filenames are raw bytes) and in the string literals of
+        // unresolved include expressions. Without it json_encode returns false
+        // on such input, and the analysis — which ran successfully — would exit
+        // as if it could not run. Invalid bytes become U+FFFD; the document
+        // stays valid and complete.
+        $json = json_encode(
+            $document,
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+        );
         if ($json === false) {
             throw new \RuntimeException('failed to encode analysis result as JSON: ' . json_last_error_msg());
         }

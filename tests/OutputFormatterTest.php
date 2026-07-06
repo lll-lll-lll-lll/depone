@@ -298,4 +298,35 @@ final class OutputFormatterTest extends TestCase
 
         self::assertSame($expected, (new OutputFormatter())->formatJson($result));
     }
+
+    public function testFormatJsonSubstitutesNonUtf8BytesInsteadOfFailing(): void
+    {
+        // Linux filenames are raw bytes and legacy include expressions can carry
+        // latin-1 literals; a lone 0xE9 byte is not valid UTF-8. Encoding must
+        // still succeed (so an analysis that ran exits 0/1, not 2) by
+        // substituting U+FFFD rather than returning false.
+        $result = [
+            'redundant' => [],
+            'fixable' => [],
+            'conflicting' => [],
+            'needed' => [],
+            'unresolved' => [
+                [
+                    'file' => "caf\xE9/index.php",
+                    'line' => 3,
+                    'type' => 'include',
+                    'reason' => 'complex',
+                    'expr' => "\xE9 . '/x.php'",
+                ],
+            ],
+            'edges' => [],
+        ];
+
+        $json = (new OutputFormatter())->formatJson($result);
+        $decoded = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertIsArray($decoded);
+        self::assertStringContainsString("\u{FFFD}", $decoded['unresolved'][0]['file']);
+        self::assertStringContainsString("\u{FFFD}", $decoded['unresolved'][0]['expr']);
+    }
 }
