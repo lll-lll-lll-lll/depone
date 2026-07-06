@@ -238,6 +238,67 @@ final class CliApplicationTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // --explain
+    // -------------------------------------------------------------------------
+
+    public function testExplainPrintsCoverageHeaderAndEvidence(): void
+    {
+        $r = $this->runAppInRoot(self::$classificationFixtureRoot, '--explain');
+        self::assertSame(1, $r['exitCode']);
+        self::assertSame('', $r['stderr']);
+
+        // Coverage header: every require_once site is accounted for,
+        // including the one "needed" require the default text output hides.
+        self::assertStringContainsString('includes_total=', $r['stdout']);
+        self::assertStringContainsString('resolved=', $r['stdout']);
+        self::assertStringContainsString('unresolved=', $r['stdout']);
+        self::assertStringContainsString('needed_require_once=1', $r['stdout']);
+
+        // Evidence line under the redundant finding.
+        self::assertStringContainsString(
+            'App\Reachable => autoloaded via psr-4 from src/Reachable.php',
+            $r['stdout']
+        );
+        self::assertStringContainsString(
+            'pure declaration file: autoload reproduces everything this file provides',
+            $r['stdout']
+        );
+
+        // The frozen section lines are still present, verbatim.
+        self::assertStringContainsString('redundant_require_once=1', $r['stdout']);
+        self::assertStringContainsString('public/index.php:5 => src/Reachable.php', $r['stdout']);
+        self::assertStringContainsString('fixable_require_once=1', $r['stdout']);
+        self::assertStringContainsString(
+            'src/WrongPath.php  (App\Sub\Missing would load from src/Sub/Missing.php'
+                . ' — fix autoload, then remove this require)',
+            $r['stdout']
+        );
+        self::assertStringContainsString('conflicting_require_once=1', $r['stdout']);
+        self::assertStringContainsString(
+            'src/Dup.php  (App\Dup is autoloaded from classmap/Dup.php'
+                . ' — this require loads a shadowed copy)',
+            $r['stdout']
+        );
+        self::assertStringContainsString('unresolved_include_require=0', $r['stdout']);
+    }
+
+    public function testExplainCombinedWithFormatJsonExitsTwo(): void
+    {
+        $r = $this->runApp('--explain', '--format=json');
+        self::assertSame(2, $r['exitCode']);
+        self::assertStringContainsString('--explain only applies to the text format', $r['stderr']);
+        self::assertSame('', $r['stdout']);
+    }
+
+    public function testExplainCombinedWithTraceExitsTwo(): void
+    {
+        $r = $this->runApp('--explain', '--trace', 'src/Bar.php');
+        self::assertSame(2, $r['exitCode']);
+        self::assertStringContainsString('--explain cannot be combined with --trace', $r['stderr']);
+        self::assertSame('', $r['stdout']);
+    }
+
+    // -------------------------------------------------------------------------
     // Error cases
     // -------------------------------------------------------------------------
 

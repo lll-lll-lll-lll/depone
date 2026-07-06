@@ -42,7 +42,8 @@ final class FindRedundantCommand extends Command
             ->setName(self::NAME)
             ->setDescription('Classify require_once statements by their relationship to Composer autoload (redundant, fixable, conflicting).')
             ->addOption('trace', null, InputOption::VALUE_REQUIRED, 'Show reverse caller traces for the given file path (repo relative) — who requires this file?')
-            ->addOption('format', null, InputOption::VALUE_REQUIRED, 'Output format: "text" (default) or "json"', 'text');
+            ->addOption('format', null, InputOption::VALUE_REQUIRED, 'Output format: "text" (default) or "json"', 'text')
+            ->addOption('explain', null, InputOption::VALUE_NONE, 'Prepend the coverage summary and print autoload evidence under each redundant finding (text only; human-facing output, not part of the frozen text contract)');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -69,6 +70,16 @@ final class FindRedundantCommand extends Command
             return self::EXIT_ERROR;
         }
 
+        $explain = $input->getOption('explain') === true;
+        if ($explain && $format === 'json') {
+            $errOutput->writeln('--explain only applies to the text format');
+            return self::EXIT_ERROR;
+        }
+        if ($explain && $traceTarget !== null) {
+            $errOutput->writeln('--explain cannot be combined with --trace');
+            return self::EXIT_ERROR;
+        }
+
         try {
             $analyzer = new Analyzer($repoRoot);
             $result = $analyzer->run();
@@ -82,7 +93,11 @@ final class FindRedundantCommand extends Command
                 return self::EXIT_OK;
             }
 
-            $this->writeRaw($output, $format === 'json' ? $formatter->formatJson($result) : $formatter->formatSummary($result));
+            if ($format === 'json') {
+                $this->writeRaw($output, $formatter->formatJson($result));
+            } else {
+                $this->writeRaw($output, $explain ? $formatter->formatSummaryWithEvidence($result) : $formatter->formatSummary($result));
+            }
 
             // unresolved entries are reported but deliberately do not affect
             // the exit code: legacy dynamic includes are often legitimate, and

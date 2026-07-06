@@ -8,6 +8,7 @@ namespace Depone\Internal\Core;
  * Formats analysis output.
  *
  * @phpstan-import-type AnalysisResult from \Depone\Internal\Core\Analyzer
+ * @phpstan-import-type RedundantProof from \Depone\Internal\Core\Analyzer
  * @phpstan-import-type TraceResult from \Depone\Internal\Core\DependencyGraph
  * @phpstan-import-type TracePath from \Depone\Internal\Core\DependencyGraph
  *
@@ -38,6 +39,68 @@ final class OutputFormatter
         foreach ($result['unresolved'] as $row) {
             $output .= "  {$row['file']}:{$row['line']} [{$row['reason']}] {$row['expr']}" . PHP_EOL;
         }
+
+        return $output;
+    }
+
+    /**
+     * Formats a human-facing text summary with a coverage header and
+     * autoload evidence under each redundant finding. Unlike formatSummary(),
+     * this output is NOT a frozen contract and may change shape between
+     * releases; it exists to explain a finding, not to be parsed.
+     *
+     * Deliberately generates the same section lines formatSummary() does
+     * (rather than sharing its implementation) so that method's body can stay
+     * untouched and its byte-exact contract stays trivially verifiable.
+     *
+     * @param AnalysisResult $result
+     */
+    public function formatSummaryWithEvidence(array $result): string
+    {
+        $output = "includes_total=" . (count($result['edges']) + count($result['unresolved'])) . PHP_EOL;
+        $output .= "resolved=" . count($result['edges']) . PHP_EOL;
+        $output .= "unresolved=" . count($result['unresolved']) . PHP_EOL;
+        $output .= "needed_require_once=" . count($result['needed']) . PHP_EOL;
+        $output .= PHP_EOL;
+
+        foreach (Analyzer::ACTIONABLE_CATEGORIES as $category) {
+            $output .= "{$category}_require_once=" . count($result[$category]) . PHP_EOL;
+            foreach ($result[$category] as $row) {
+                $output .= isset($row['detail'])
+                    ? "  {$row['file']}:{$row['line']} => {$row['target']}  ({$row['detail']})" . PHP_EOL
+                    : "{$row['file']}:{$row['line']} => {$row['target']}" . PHP_EOL;
+
+                if (isset($row['proof'])) {
+                    $output .= $this->formatRedundantEvidence($row['proof']);
+                }
+            }
+            $output .= PHP_EOL;
+        }
+        $output .= "unresolved_include_require=" . count($result['unresolved']) . PHP_EOL;
+        foreach ($result['unresolved'] as $row) {
+            $output .= "  {$row['file']}:{$row['line']} [{$row['reason']}] {$row['expr']}" . PHP_EOL;
+        }
+
+        return $output;
+    }
+
+    /**
+     * Formats the autoload evidence lines printed under a redundant finding
+     * in --explain output.
+     *
+     * @param RedundantProof $proof
+     */
+    private function formatRedundantEvidence(array $proof): string
+    {
+        if ($proof['eager']) {
+            return '    autoload.files entry — loaded eagerly on Composer init, so this require is a no-op' . PHP_EOL;
+        }
+
+        $output = '';
+        foreach ($proof['classes'] as $evidence) {
+            $output .= "    {$evidence['class']} => autoloaded via {$evidence['via']} from {$evidence['path']}" . PHP_EOL;
+        }
+        $output .= '    pure declaration file: autoload reproduces everything this file provides' . PHP_EOL;
 
         return $output;
     }
