@@ -8,6 +8,8 @@ use Depone\Internal\Core\Analyzer;
 use Depone\Internal\Core\DependencyGraph;
 use Depone\Internal\Core\OutputFormatter as InternalOutputFormatter;
 use Depone\Internal\Exception\AnalyzerException;
+use Depone\Internal\Resolver\ComposerLoaderVerifier;
+use Depone\Internal\Tokenizer\PathHelper;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -15,6 +17,9 @@ use Symfony\Component\Console\Output\ConsoleOutputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
+ * @phpstan-import-type RedundantEntry from \Depone\Internal\Core\Analyzer
+ * @phpstan-import-type VerifyResult from \Depone\Internal\Core\OutputFormatter
+ *
  * @internal
  */
 final class FindRedundantCommand extends Command
@@ -43,7 +48,8 @@ final class FindRedundantCommand extends Command
             ->setDescription('Classify require_once statements by their relationship to Composer autoload (redundant, fixable, conflicting).')
             ->addOption('trace', null, InputOption::VALUE_REQUIRED, 'Show reverse caller traces for the given file path (repo relative) — who requires this file?')
             ->addOption('format', null, InputOption::VALUE_REQUIRED, 'Output format: "text" (default) or "json"', 'text')
-            ->addOption('explain', null, InputOption::VALUE_NONE, 'Prepend the coverage summary and print autoload evidence under each redundant finding (text only; human-facing output, not part of the frozen text contract)');
+            ->addOption('explain', null, InputOption::VALUE_NONE, 'Prepend the coverage summary and print autoload evidence under each redundant finding (text only; human-facing output, not part of the frozen text contract)')
+            ->addOption('verify', null, InputOption::VALUE_NONE, 'Cross-check every redundant finding against the autoload maps Composer dumped under vendor/composer/ (uses Composer\'s own ClassLoader; never executes project code)');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -80,6 +86,16 @@ final class FindRedundantCommand extends Command
             return self::EXIT_ERROR;
         }
 
+        $verify = $input->getOption('verify') === true;
+        if ($verify && $traceTarget !== null) {
+            $errOutput->writeln('--verify cannot be combined with --trace');
+            return self::EXIT_ERROR;
+        }
+        if ($verify && !ComposerLoaderVerifier::isAvailable($repoRoot)) {
+            $errOutput->writeln('composer autoload maps not found under vendor/composer — run "composer install" (or "composer dump-autoload") first');
+            return self::EXIT_ERROR;
+        }
+
         try {
             $analyzer = new Analyzer($repoRoot);
             $result = $analyzer->run();
@@ -93,10 +109,16 @@ final class FindRedundantCommand extends Command
                 return self::EXIT_OK;
             }
 
+            $verifyResult = $verify ? $this->verifyRedundantFindings($result['redundant'], new ComposerLoaderVerifier($repoRoot), $repoRoot) : null;
+
             if ($format === 'json') {
-                $this->writeRaw($output, $formatter->formatJson($result));
+                $this->writeRaw($output, $formatter->formatJson($result, $verifyResult));
             } else {
-                $this->writeRaw($output, $explain ? $formatter->formatSummaryWithEvidence($result) : $formatter->formatSummary($result));
+                $text = $explain ? $formatter->formatSummaryWithEvidence($result) : $formatter->formatSummary($result);
+                if ($verifyResult !== null) {
+                    $text .= $formatter->formatVerifySection($verifyResult['mismatches']);
+                }
+                $this->writeRaw($output, $text);
             }
 
             // unresolved entries are reported but deliberately do not affect
@@ -110,12 +132,88 @@ final class FindRedundantCommand extends Command
                     break;
                 }
             }
+            $hasFindings = $hasFindings || ($verifyResult !== null && $verifyResult['mismatches'] !== []);
 
             return $hasFindings ? self::EXIT_FINDINGS : self::EXIT_OK;
         } catch (AnalyzerException $e) {
             $errOutput->writeln($e->getMessage());
             return self::EXIT_ERROR;
         }
+    }
+
+    /**
+     * Cross-checks every redundant finding against Composer's dumped
+     * autoload maps. Only redundant findings are checked: fixable/
+     * conflicting/needed already assert that the require is broken or
+     * hazardous rather than deletable, so there is nothing to double-check
+     * there. A mismatch here means either the dump is stale (run
+     * `composer dump-autoload`) or depone's own static resolution is wrong;
+     * either way it must reach the user before they delete anything.
+     *
+     * @param list<RedundantEntry> $redundant
+     * @return VerifyResult
+     */
+    private function verifyRedundantFindings(array $redundant, ComposerLoaderVerifier $verifier, string $repoRoot): array
+    {
+        $failures = [];
+        $entryVerified = [];
+
+        foreach ($redundant as $entry) {
+            $targetAbsolute = PathHelper::normalize($repoRoot . '/' . $entry['target']);
+            $proof = $entry['proof'];
+            $verified = true;
+
+            if ($proof['eager']) {
+                if (!$verifier->verifyEagerTarget($targetAbsolute)) {
+                    $verified = false;
+                    $failures[] = [
+                        'file' => $entry['file'],
+                        'line' => $entry['line'],
+                        'target' => $entry['target'],
+                        'class' => null,
+                        'loader_path' => null,
+                        'reason' => 'target is not an autoload.files entry in composer\'s dump — run composer dump-autoload',
+                    ];
+                }
+            } else {
+                foreach ($proof['classes'] as $evidence) {
+                    $check = $verifier->verifyClass($evidence['class'], $targetAbsolute);
+                    if ($check['status'] === 'verified') {
+                        continue;
+                    }
+
+                    $verified = false;
+                    if ($check['status'] === 'mismatch') {
+                        $failures[] = [
+                            'file' => $entry['file'],
+                            'line' => $entry['line'],
+                            'target' => $entry['target'],
+                            'class' => $evidence['class'],
+                            'loader_path' => PathHelper::toRelative(PathHelper::normalize($check['loaderPath']), $repoRoot),
+                            'reason' => 'composer loader resolves a different file',
+                        ];
+                    } else {
+                        $failures[] = [
+                            'file' => $entry['file'],
+                            'line' => $entry['line'],
+                            'target' => $entry['target'],
+                            'class' => $evidence['class'],
+                            'loader_path' => null,
+                            'reason' => 'class not present in composer\'s dumped autoload — run composer dump-autoload',
+                        ];
+                    }
+                }
+            }
+
+            $entryVerified[] = $verified;
+        }
+
+        return [
+            'checked' => count($redundant),
+            'verified' => count(array_filter($entryVerified)),
+            'mismatches' => $failures,
+            'entryVerified' => $entryVerified,
+        ];
     }
 
     /**

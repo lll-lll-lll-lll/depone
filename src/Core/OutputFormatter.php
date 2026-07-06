@@ -11,6 +11,8 @@ namespace Depone\Internal\Core;
  * @phpstan-import-type RedundantProof from \Depone\Internal\Core\Analyzer
  * @phpstan-import-type TraceResult from \Depone\Internal\Core\DependencyGraph
  * @phpstan-import-type TracePath from \Depone\Internal\Core\DependencyGraph
+ * @phpstan-type VerifyFailure array{file: string, line: int, target: string, class: string|null, loader_path: string|null, reason: string}
+ * @phpstan-type VerifyResult array{checked: int, verified: int, mismatches: list<VerifyFailure>, entryVerified: list<bool>}
  *
  * @internal
  */
@@ -106,6 +108,41 @@ final class OutputFormatter
     }
 
     /**
+     * Formats the autoload-map cross-check failures gathered by --verify, as
+     * a trailing text section. Additive to formatSummary()/
+     * formatSummaryWithEvidence() output, so it never disturbs the frozen
+     * contract; printed whenever --verify was given, including the
+     * `verify_mismatches=0` line when everything verified.
+     *
+     * @param list<VerifyFailure> $failures
+     */
+    public function formatVerifySection(array $failures): string
+    {
+        $output = 'verify_mismatches=' . count($failures) . PHP_EOL;
+        foreach ($failures as $failure) {
+            $output .= "  {$failure['file']}:{$failure['line']} => {$failure['target']}  ({$this->formatVerifyFailureMessage($failure)})" . PHP_EOL;
+        }
+
+        return $output;
+    }
+
+    /**
+     * @param VerifyFailure $failure
+     */
+    private function formatVerifyFailureMessage(array $failure): string
+    {
+        if ($failure['loader_path'] !== null) {
+            return "{$failure['class']}: composer loader resolves {$failure['loader_path']}";
+        }
+
+        if ($failure['class'] !== null) {
+            return "{$failure['class']}: {$failure['reason']}";
+        }
+
+        return $failure['reason'];
+    }
+
+    /**
      * Formats the analysis result as JSON: depone's machine-readable
      * contract. Every section is built explicitly, key by key, rather than
      * `json_encode`d straight from the internal result array, so the schema
@@ -114,8 +151,11 @@ final class OutputFormatter
      * backward-incompatible way.
      *
      * @param AnalysisResult $result
+     * @param VerifyResult|null $verify Present only when --verify was given;
+     *     adds `verified` to each redundant entry and a top-level `verify`
+     *     block.
      */
-    public function formatJson(array $result): string
+    public function formatJson(array $result, ?array $verify = null): string
     {
         $document = [
             'schema_version' => 1,
@@ -131,7 +171,7 @@ final class OutputFormatter
                 ],
             ],
             'redundant' => array_map(
-                static fn (array $row): array => [
+                static fn (array $row, int $index): array => [
                     'file' => $row['file'],
                     'line' => $row['line'],
                     'target' => $row['target'],
@@ -148,8 +188,10 @@ final class OutputFormatter
                             $row['proof']['classes']
                         ),
                     ],
+                    ...$verify !== null ? ['verified' => $verify['entryVerified'][$index]] : [],
                 ],
-                $result['redundant']
+                $result['redundant'],
+                array_keys($result['redundant'])
             ),
             'fixable' => array_map(
                 static fn (array $row): array => [
@@ -192,6 +234,23 @@ final class OutputFormatter
                 ],
                 $result['unresolved']
             ),
+            ...$verify !== null ? [
+                'verify' => [
+                    'checked' => $verify['checked'],
+                    'verified' => $verify['verified'],
+                    'mismatches' => array_map(
+                        static fn (array $failure): array => [
+                            'file' => $failure['file'],
+                            'line' => $failure['line'],
+                            'target' => $failure['target'],
+                            'class' => $failure['class'],
+                            'loader_path' => $failure['loader_path'],
+                            'reason' => $failure['reason'],
+                        ],
+                        $verify['mismatches']
+                    ),
+                ],
+            ] : [],
         ];
 
         $json = json_encode($document, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);

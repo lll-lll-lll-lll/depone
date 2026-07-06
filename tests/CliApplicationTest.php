@@ -21,6 +21,7 @@ final class CliApplicationTest extends TestCase
 {
     private static string $fixtureRoot;
     private static string $classificationFixtureRoot;
+    private static string $verifyFixtureRoot;
 
     public static function setUpBeforeClass(): void
     {
@@ -31,6 +32,10 @@ final class CliApplicationTest extends TestCase
         $classificationPath = realpath(__DIR__ . '/Fixture/RequireClassificationProject');
         self::assertNotFalse($classificationPath, 'RequireClassificationProject fixture not found');
         self::$classificationFixtureRoot = $classificationPath;
+
+        $verifyPath = realpath(__DIR__ . '/Fixture/VerifyProject');
+        self::assertNotFalse($verifyPath, 'VerifyProject fixture not found');
+        self::$verifyFixtureRoot = $verifyPath;
     }
 
     // -------------------------------------------------------------------------
@@ -295,6 +300,66 @@ final class CliApplicationTest extends TestCase
         $r = $this->runApp('--explain', '--trace', 'src/Bar.php');
         self::assertSame(2, $r['exitCode']);
         self::assertStringContainsString('--explain cannot be combined with --trace', $r['stderr']);
+        self::assertSame('', $r['stdout']);
+    }
+
+    // -------------------------------------------------------------------------
+    // --verify
+    // -------------------------------------------------------------------------
+
+    public function testVerifyReportsMismatchesInTextOutput(): void
+    {
+        $r = $this->runAppInRoot(self::$verifyFixtureRoot, '--verify');
+        self::assertSame(1, $r['exitCode']);
+        self::assertSame('', $r['stderr']);
+
+        self::assertStringContainsString('redundant_require_once=3', $r['stdout']);
+        self::assertStringContainsString('verify_mismatches=2', $r['stdout']);
+        self::assertStringContainsString(
+            'public/index.php:6 => src/Stale.php  (App\Stale: composer loader resolves legacy/Stale.php)',
+            $r['stdout']
+        );
+        self::assertStringContainsString(
+            'public/index.php:7 => lib/Thing.php  (Lib\Thing: class not present in composer\'s dumped autoload'
+                . ' — run composer dump-autoload)',
+            $r['stdout']
+        );
+    }
+
+    public function testVerifyWithFormatJsonAddsVerifyBlock(): void
+    {
+        $r = $this->runAppInRoot(self::$verifyFixtureRoot, '--verify', '--format=json');
+        self::assertSame(1, $r['exitCode']);
+        self::assertSame('', $r['stderr']);
+
+        $document = json_decode($r['stdout'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame(3, $document['verify']['checked']);
+        self::assertSame(1, $document['verify']['verified']);
+        self::assertCount(2, $document['verify']['mismatches']);
+
+        $verifiedFlags = array_column($document['redundant'], 'verified', 'target');
+        self::assertSame(
+            ['src/Ok.php' => true, 'src/Stale.php' => false, 'lib/Thing.php' => false],
+            $verifiedFlags
+        );
+    }
+
+    public function testVerifyWithoutComposerMapsExitsTwo(): void
+    {
+        $r = $this->runApp('--verify');
+        self::assertSame(2, $r['exitCode']);
+        self::assertStringContainsString(
+            'composer autoload maps not found under vendor/composer',
+            $r['stderr']
+        );
+        self::assertSame('', $r['stdout']);
+    }
+
+    public function testVerifyCombinedWithTraceExitsTwo(): void
+    {
+        $r = $this->runAppInRoot(self::$verifyFixtureRoot, '--verify', '--trace', 'src/Ok.php');
+        self::assertSame(2, $r['exitCode']);
+        self::assertStringContainsString('--verify cannot be combined with --trace', $r['stderr']);
         self::assertSame('', $r['stdout']);
     }
 
