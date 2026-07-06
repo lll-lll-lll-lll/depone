@@ -11,7 +11,7 @@ use SplFileInfo;
 /**
  * Resolves class names to file paths from Composer autoload settings.
  *
- * @phpstan-type VerboseResolution array{prefix: string|null, expectedPath: string|null, resolved: string|null, via: 'classmap'|'psr-4'|'psr-0'|null}
+ * @phpstan-type VerboseResolution array{prefix: string|null, expectedPath: string|null, resolved: string, via: 'classmap'|'psr-4'|'psr-0'}|array{prefix: string|null, expectedPath: string|null, resolved: null, via: null}
  *
  * @internal
  */
@@ -45,7 +45,7 @@ final class AutoloadResolver
         // Strip a leading namespace separator.
         $className = ltrim($className, '\\');
 
-        return $this->resolveWithMechanism($className)['path'];
+        return $this->resolveWithMechanism($className)['resolved'];
     }
 
     /**
@@ -65,7 +65,7 @@ final class AutoloadResolver
         // Strip a leading namespace separator.
         $className = ltrim($className, '\\');
 
-        ['path' => $resolved, 'via' => $via] = $this->resolveWithMechanism($className);
+        $mechanism = $this->resolveWithMechanism($className);
 
         $psr4Match = $this->matchPrefix($this->psr4, $className);
         if ($psr4Match !== null) {
@@ -73,7 +73,7 @@ final class AutoloadResolver
             $relativeClass = $prefix === '' ? $className : substr($className, strlen($prefix));
             $expectedPath = $dirs[0] . '/' . str_replace('\\', '/', $relativeClass) . '.php';
 
-            return ['prefix' => $prefix, 'expectedPath' => $expectedPath, 'resolved' => $resolved, 'via' => $via];
+            return $this->withPrefixAndExpectedPath($prefix, $expectedPath, $mechanism);
         }
 
         $psr0Match = $this->matchPrefix($this->psr0, $className);
@@ -81,10 +81,34 @@ final class AutoloadResolver
             [$prefix, $dirs] = $psr0Match;
             $expectedPath = $this->psr0ExpectedPath($dirs[0], $className);
 
-            return ['prefix' => $prefix, 'expectedPath' => $expectedPath, 'resolved' => $resolved, 'via' => $via];
+            return $this->withPrefixAndExpectedPath($prefix, $expectedPath, $mechanism);
         }
 
-        return ['prefix' => null, 'expectedPath' => null, 'resolved' => $resolved, 'via' => $via];
+        return $this->withPrefixAndExpectedPath(null, null, $mechanism);
+    }
+
+    /**
+     * Combines a matched PSR rule (or the lack of one) with the resolution
+     * mechanism into a VerboseResolution. Kept as a single helper, checking
+     * `$mechanism['resolved']` directly rather than splitting it into
+     * separate variables, so the resolved/via correlation from
+     * {@see resolveWithMechanism()}'s discriminated union survives.
+     *
+     * @param array{resolved: string, via: 'classmap'|'psr-4'|'psr-0'}|array{resolved: null, via: null} $mechanism
+     * @return VerboseResolution
+     */
+    private function withPrefixAndExpectedPath(?string $prefix, ?string $expectedPath, array $mechanism): array
+    {
+        if ($mechanism['resolved'] !== null) {
+            return [
+                'prefix' => $prefix,
+                'expectedPath' => $expectedPath,
+                'resolved' => $mechanism['resolved'],
+                'via' => $mechanism['via'],
+            ];
+        }
+
+        return ['prefix' => $prefix, 'expectedPath' => $expectedPath, 'resolved' => null, 'via' => null];
     }
 
     /**
@@ -94,28 +118,28 @@ final class AutoloadResolver
      * path and its mechanism can never disagree.
      *
      * @param string $className Fully qualified class name, leading `\` already stripped
-     * @return array{path: string|null, via: 'classmap'|'psr-4'|'psr-0'|null}
+     * @return array{resolved: string, via: 'classmap'|'psr-4'|'psr-0'}|array{resolved: null, via: null}
      */
     private function resolveWithMechanism(string $className): array
     {
         // Prefer classmap entries.
         if (isset($this->classmap[$className])) {
-            return ['path' => $this->classmap[$className], 'via' => 'classmap'];
+            return ['resolved' => $this->classmap[$className], 'via' => 'classmap'];
         }
 
         // Try PSR-4 resolution first.
         $file = $this->resolvePsr4($className);
         if ($file !== null) {
-            return ['path' => $file, 'via' => 'psr-4'];
+            return ['resolved' => $file, 'via' => 'psr-4'];
         }
 
         // Fall back to PSR-0 resolution.
         $file = $this->resolvePsr0($className);
         if ($file !== null) {
-            return ['path' => $file, 'via' => 'psr-0'];
+            return ['resolved' => $file, 'via' => 'psr-0'];
         }
 
-        return ['path' => null, 'via' => null];
+        return ['resolved' => null, 'via' => null];
     }
 
     /**

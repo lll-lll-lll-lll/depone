@@ -14,15 +14,30 @@ final class OutputFormatterTest extends TestCase
         // The text output is part of the public CLI contract: redundant rows
         // print unindented without a detail, fixable/conflicting rows print
         // indented with one, and every section appears even when empty.
+        // `needed` is deliberately non-empty here and must not change a single
+        // byte of the output: it is invisible in the default text format.
         $result = [
             'redundant' => [
-                ['file' => 'public/index.php', 'line' => 5, 'target' => 'src/Bar.php'],
+                [
+                    'file' => 'public/index.php',
+                    'line' => 5,
+                    'target' => 'src/Bar.php',
+                    'proof' => [
+                        'eager' => false,
+                        'pure_declaration' => true,
+                        'classes' => [
+                            ['class' => 'App\Bar', 'via' => 'psr-4', 'prefix' => 'App\\', 'path' => 'src/Bar.php'],
+                        ],
+                    ],
+                ],
             ],
             'fixable' => [
                 [
                     'file' => 'public/a.php',
                     'line' => 7,
                     'target' => 'src/WrongPath.php',
+                    'class' => 'App\Missing',
+                    'expected_path' => 'src/Missing.php',
                     'detail' => 'App\Missing would load from src/Missing.php — fix autoload, then remove this require',
                 ],
             ],
@@ -31,7 +46,17 @@ final class OutputFormatterTest extends TestCase
                     'file' => 'public/b.php',
                     'line' => 9,
                     'target' => 'src/Dup.php',
+                    'class' => 'App\Dup',
+                    'loaded_from' => 'classmap/Dup.php',
                     'detail' => 'App\Dup is autoloaded from classmap/Dup.php — this require loads a shadowed copy',
+                ],
+            ],
+            'needed' => [
+                [
+                    'file' => 'public/d.php',
+                    'line' => 11,
+                    'target' => 'src/helper.php',
+                    'reason' => 'target declares no types',
                 ],
             ],
             'unresolved' => [
@@ -61,6 +86,7 @@ final class OutputFormatterTest extends TestCase
             'redundant' => [],
             'fixable' => [],
             'conflicting' => [],
+            'needed' => [],
             'unresolved' => [],
             'edges' => [],
         ];
