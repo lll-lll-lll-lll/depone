@@ -97,28 +97,34 @@ final class DeclaredClassExtractor
         $stmts = (new NodeTraverser(new NameResolver()))->traverse($stmts);
 
         $names = [];
-        $this->collectTopLevelClassLikes($stmts, $names);
+        foreach ($this->topLevelStmts($stmts) as $stmt) {
+            if ($stmt instanceof ClassLike && $stmt->name !== null) {
+                $names[] = $stmt->namespacedName?->toString() ?? $stmt->name->toString();
+            }
+        }
 
         return array_values(array_unique($names));
     }
 
     /**
+     * Yields the statements at the namespace top level, recursing only into
+     * (braced or unbraced) namespace bodies and declare blocks. Both
+     * extractTopLevel() and onlyDeclarations() consume this, so they can never
+     * disagree on what "top level" means — a nesting rule added here stays
+     * shared between the conflict/round-trip check and the side-effect gate.
+     *
      * @param Node[] $stmts
-     * @param list<string> $names
+     * @return iterable<Node>
      */
-    private function collectTopLevelClassLikes(array $stmts, array &$names): void
+    private function topLevelStmts(array $stmts): iterable
     {
         foreach ($stmts as $stmt) {
             if ($stmt instanceof Namespace_) {
-                $this->collectTopLevelClassLikes($stmt->stmts, $names);
-                continue;
-            }
-            if ($stmt instanceof Declare_ && $stmt->stmts !== null) {
-                $this->collectTopLevelClassLikes($stmt->stmts, $names);
-                continue;
-            }
-            if ($stmt instanceof ClassLike && $stmt->name !== null) {
-                $names[] = $stmt->namespacedName?->toString() ?? $stmt->name->toString();
+                yield from $this->topLevelStmts($stmt->stmts);
+            } elseif ($stmt instanceof Declare_ && $stmt->stmts !== null) {
+                yield from $this->topLevelStmts($stmt->stmts);
+            } else {
+                yield $stmt;
             }
         }
     }
@@ -151,22 +157,7 @@ final class DeclaredClassExtractor
      */
     private function onlyDeclarations(array $stmts): bool
     {
-        foreach ($stmts as $stmt) {
-            // A (braced or unbraced) namespace's body is itself top level, as is
-            // a declare block; recurse into either.
-            if ($stmt instanceof Namespace_) {
-                if (!$this->onlyDeclarations($stmt->stmts)) {
-                    return false;
-                }
-                continue;
-            }
-            if ($stmt instanceof Declare_ && $stmt->stmts !== null) {
-                if (!$this->onlyDeclarations($stmt->stmts)) {
-                    return false;
-                }
-                continue;
-            }
-
+        foreach ($this->topLevelStmts($stmts) as $stmt) {
             // Declarations and pure scaffolding carry no side effect.
             $allowed = $stmt instanceof ClassLike
                 || $stmt instanceof Use_
