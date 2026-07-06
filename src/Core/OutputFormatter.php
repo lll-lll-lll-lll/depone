@@ -43,6 +43,103 @@ final class OutputFormatter
     }
 
     /**
+     * Formats the analysis result as JSON: depone's machine-readable
+     * contract. Every section is built explicitly, key by key, rather than
+     * `json_encode`d straight from the internal result array, so the schema
+     * is decoupled from internal array shapes and can evolve independently.
+     * `schema_version` is bumped whenever the shape changes in a
+     * backward-incompatible way.
+     *
+     * @param AnalysisResult $result
+     */
+    public function formatJson(array $result): string
+    {
+        $document = [
+            'schema_version' => 1,
+            'summary' => [
+                'includes_total' => count($result['edges']) + count($result['unresolved']),
+                'resolved' => count($result['edges']),
+                'unresolved' => count($result['unresolved']),
+                'require_once' => [
+                    'redundant' => count($result['redundant']),
+                    'fixable' => count($result['fixable']),
+                    'conflicting' => count($result['conflicting']),
+                    'needed' => count($result['needed']),
+                ],
+            ],
+            'redundant' => array_map(
+                static fn (array $row): array => [
+                    'file' => $row['file'],
+                    'line' => $row['line'],
+                    'target' => $row['target'],
+                    'proof' => [
+                        'eager' => $row['proof']['eager'],
+                        'pure_declaration' => $row['proof']['pure_declaration'],
+                        'classes' => array_map(
+                            static fn (array $evidence): array => [
+                                'class' => $evidence['class'],
+                                'via' => $evidence['via'],
+                                'prefix' => $evidence['prefix'],
+                                'path' => $evidence['path'],
+                            ],
+                            $row['proof']['classes']
+                        ),
+                    ],
+                ],
+                $result['redundant']
+            ),
+            'fixable' => array_map(
+                static fn (array $row): array => [
+                    'file' => $row['file'],
+                    'line' => $row['line'],
+                    'target' => $row['target'],
+                    'class' => $row['class'],
+                    'expected_path' => $row['expected_path'],
+                    'detail' => $row['detail'],
+                ],
+                $result['fixable']
+            ),
+            'conflicting' => array_map(
+                static fn (array $row): array => [
+                    'file' => $row['file'],
+                    'line' => $row['line'],
+                    'target' => $row['target'],
+                    'class' => $row['class'],
+                    'loaded_from' => $row['loaded_from'],
+                    'detail' => $row['detail'],
+                ],
+                $result['conflicting']
+            ),
+            'needed' => array_map(
+                static fn (array $row): array => [
+                    'file' => $row['file'],
+                    'line' => $row['line'],
+                    'target' => $row['target'],
+                    'reason' => $row['reason'],
+                ],
+                $result['needed']
+            ),
+            'unresolved' => array_map(
+                static fn (array $row): array => [
+                    'file' => $row['file'],
+                    'line' => $row['line'],
+                    'type' => $row['type'],
+                    'reason' => $row['reason'],
+                    'expr' => $row['expr'],
+                ],
+                $result['unresolved']
+            ),
+        ];
+
+        $json = json_encode($document, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($json === false) {
+            throw new \RuntimeException('failed to encode analysis result as JSON: ' . json_last_error_msg());
+        }
+
+        return $json . PHP_EOL;
+    }
+
+    /**
      * Formats reverse-trace output.
      *
      * @param TraceResult $trace

@@ -41,7 +41,8 @@ final class FindRedundantCommand extends Command
         $this
             ->setName(self::NAME)
             ->setDescription('Classify require_once statements by their relationship to Composer autoload (redundant, fixable, conflicting).')
-            ->addOption('trace', null, InputOption::VALUE_REQUIRED, 'Show reverse caller traces for the given file path (repo relative) — who requires this file?');
+            ->addOption('trace', null, InputOption::VALUE_REQUIRED, 'Show reverse caller traces for the given file path (repo relative) — who requires this file?')
+            ->addOption('format', null, InputOption::VALUE_REQUIRED, 'Output format: "text" (default) or "json"', 'text');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -57,6 +58,17 @@ final class FindRedundantCommand extends Command
         $traceOption = $input->getOption('trace');
         $traceTarget = is_string($traceOption) ? $traceOption : null;
 
+        $formatOption = $input->getOption('format');
+        $format = is_string($formatOption) ? $formatOption : 'text';
+        if ($format !== 'text' && $format !== 'json') {
+            $errOutput->writeln("unknown format \"{$format}\" (expected \"text\" or \"json\")");
+            return self::EXIT_ERROR;
+        }
+        if ($format === 'json' && $traceTarget !== null) {
+            $errOutput->writeln('--trace has no JSON format');
+            return self::EXIT_ERROR;
+        }
+
         try {
             $analyzer = new Analyzer($repoRoot);
             $result = $analyzer->run();
@@ -70,7 +82,7 @@ final class FindRedundantCommand extends Command
                 return self::EXIT_OK;
             }
 
-            $this->writeRaw($output, $formatter->formatSummary($result));
+            $this->writeRaw($output, $format === 'json' ? $formatter->formatJson($result) : $formatter->formatSummary($result));
 
             // unresolved entries are reported but deliberately do not affect
             // the exit code: legacy dynamic includes are often legitimate, and

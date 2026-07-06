@@ -101,4 +101,177 @@ final class OutputFormatterTest extends TestCase
 
         self::assertSame($expected, (new OutputFormatter())->formatSummary($result));
     }
+
+    public function testFormatJsonOutputIsByteExact(): void
+    {
+        // The JSON document is the machine-readable contract: every section
+        // is built explicitly, so this pins the exact shape rather than
+        // whatever the internal result array happens to look like.
+        $result = [
+            'redundant' => [
+                [
+                    'file' => 'public/index.php',
+                    'line' => 5,
+                    'target' => 'src/Bar.php',
+                    'proof' => [
+                        'eager' => false,
+                        'pure_declaration' => true,
+                        'classes' => [
+                            ['class' => 'App\Bar', 'via' => 'psr-4', 'prefix' => 'App\\', 'path' => 'src/Bar.php'],
+                        ],
+                    ],
+                ],
+            ],
+            'fixable' => [
+                [
+                    'file' => 'public/a.php',
+                    'line' => 7,
+                    'target' => 'src/WrongPath.php',
+                    'class' => 'App\Missing',
+                    'expected_path' => 'src/Missing.php',
+                    'detail' => 'App\Missing would load from src/Missing.php — fix autoload, then remove this require',
+                ],
+            ],
+            'conflicting' => [
+                [
+                    'file' => 'public/b.php',
+                    'line' => 9,
+                    'target' => 'src/Dup.php',
+                    'class' => 'App\Dup',
+                    'loaded_from' => 'classmap/Dup.php',
+                    'detail' => 'App\Dup is autoloaded from classmap/Dup.php — this require loads a shadowed copy',
+                ],
+            ],
+            'needed' => [
+                [
+                    'file' => 'public/d.php',
+                    'line' => 11,
+                    'target' => 'src/helper.php',
+                    'reason' => 'target declares no types',
+                ],
+            ],
+            'unresolved' => [
+                ['file' => 'public/c.php', 'line' => 3, 'type' => 'include', 'reason' => 'complex', 'expr' => "SITE_ROOT . '/x.php'"],
+            ],
+            'edges' => [
+                ['from' => 'public/index.php', 'line' => 5, 'type' => 'require_once', 'to' => 'src/Bar.php'],
+                ['from' => 'public/a.php', 'line' => 7, 'type' => 'require_once', 'to' => 'src/WrongPath.php'],
+                ['from' => 'public/b.php', 'line' => 9, 'type' => 'require_once', 'to' => 'src/Dup.php'],
+                ['from' => 'public/d.php', 'line' => 11, 'type' => 'require_once', 'to' => 'src/helper.php'],
+            ],
+        ];
+
+        $expected = <<<'JSON'
+        {
+            "schema_version": 1,
+            "summary": {
+                "includes_total": 5,
+                "resolved": 4,
+                "unresolved": 1,
+                "require_once": {
+                    "redundant": 1,
+                    "fixable": 1,
+                    "conflicting": 1,
+                    "needed": 1
+                }
+            },
+            "redundant": [
+                {
+                    "file": "public/index.php",
+                    "line": 5,
+                    "target": "src/Bar.php",
+                    "proof": {
+                        "eager": false,
+                        "pure_declaration": true,
+                        "classes": [
+                            {
+                                "class": "App\\Bar",
+                                "via": "psr-4",
+                                "prefix": "App\\",
+                                "path": "src/Bar.php"
+                            }
+                        ]
+                    }
+                }
+            ],
+            "fixable": [
+                {
+                    "file": "public/a.php",
+                    "line": 7,
+                    "target": "src/WrongPath.php",
+                    "class": "App\\Missing",
+                    "expected_path": "src/Missing.php",
+                    "detail": "App\\Missing would load from src/Missing.php — fix autoload, then remove this require"
+                }
+            ],
+            "conflicting": [
+                {
+                    "file": "public/b.php",
+                    "line": 9,
+                    "target": "src/Dup.php",
+                    "class": "App\\Dup",
+                    "loaded_from": "classmap/Dup.php",
+                    "detail": "App\\Dup is autoloaded from classmap/Dup.php — this require loads a shadowed copy"
+                }
+            ],
+            "needed": [
+                {
+                    "file": "public/d.php",
+                    "line": 11,
+                    "target": "src/helper.php",
+                    "reason": "target declares no types"
+                }
+            ],
+            "unresolved": [
+                {
+                    "file": "public/c.php",
+                    "line": 3,
+                    "type": "include",
+                    "reason": "complex",
+                    "expr": "SITE_ROOT . '/x.php'"
+                }
+            ]
+        }
+
+        JSON;
+
+        self::assertSame($expected, (new OutputFormatter())->formatJson($result));
+    }
+
+    public function testFormatJsonEmptyResultEncodesSectionsAsEmptyLists(): void
+    {
+        $result = [
+            'redundant' => [],
+            'fixable' => [],
+            'conflicting' => [],
+            'needed' => [],
+            'unresolved' => [],
+            'edges' => [],
+        ];
+
+        $expected = <<<'JSON'
+        {
+            "schema_version": 1,
+            "summary": {
+                "includes_total": 0,
+                "resolved": 0,
+                "unresolved": 0,
+                "require_once": {
+                    "redundant": 0,
+                    "fixable": 0,
+                    "conflicting": 0,
+                    "needed": 0
+                }
+            },
+            "redundant": [],
+            "fixable": [],
+            "conflicting": [],
+            "needed": [],
+            "unresolved": []
+        }
+
+        JSON;
+
+        self::assertSame($expected, (new OutputFormatter())->formatJson($result));
+    }
 }

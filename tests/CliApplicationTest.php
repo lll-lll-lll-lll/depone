@@ -196,6 +196,48 @@ final class CliApplicationTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // --format=json
+    // -------------------------------------------------------------------------
+
+    public function testFormatJsonProducesValidDocumentWithFindings(): void
+    {
+        $r = $this->runAppInRoot(self::$classificationFixtureRoot, '--format=json');
+        self::assertSame(1, $r['exitCode']);
+        self::assertSame('', $r['stderr']);
+
+        $document = json_decode($r['stdout'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame(1, $document['schema_version']);
+        self::assertSame(1, $document['summary']['require_once']['redundant']);
+        self::assertSame(1, $document['summary']['require_once']['fixable']);
+        self::assertSame(1, $document['summary']['require_once']['conflicting']);
+        self::assertSame(1, $document['summary']['require_once']['needed']);
+        self::assertCount(1, $document['redundant']);
+        self::assertCount(1, $document['fixable']);
+        self::assertCount(1, $document['conflicting']);
+        self::assertCount(1, $document['needed']);
+        self::assertSame('src/Reachable.php', $document['redundant'][0]['target']);
+        self::assertSame('src/WrongPath.php', $document['fixable'][0]['target']);
+        self::assertSame('src/Dup.php', $document['conflicting'][0]['target']);
+        self::assertSame('src/helper.php', $document['needed'][0]['target']);
+    }
+
+    public function testUnknownFormatExitsTwo(): void
+    {
+        $r = $this->runApp('--format=bogus');
+        self::assertSame(2, $r['exitCode']);
+        self::assertStringContainsString('unknown format "bogus" (expected "text" or "json")', $r['stderr']);
+        self::assertSame('', $r['stdout']);
+    }
+
+    public function testTraceCombinedWithFormatJsonExitsTwo(): void
+    {
+        $r = $this->runApp('--trace', 'src/Bar.php', '--format=json');
+        self::assertSame(2, $r['exitCode']);
+        self::assertStringContainsString('--trace has no JSON format', $r['stderr']);
+        self::assertSame('', $r['stdout']);
+    }
+
+    // -------------------------------------------------------------------------
     // Error cases
     // -------------------------------------------------------------------------
 
