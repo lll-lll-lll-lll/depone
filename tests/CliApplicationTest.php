@@ -238,7 +238,7 @@ final class CliApplicationTest extends TestCase
     {
         $r = $this->runApp('--trace', 'src/Bar.php', '--format=json');
         self::assertSame(2, $r['exitCode']);
-        self::assertStringContainsString('--trace has no JSON format', $r['stderr']);
+        self::assertStringContainsString('--format=json cannot be combined with --trace', $r['stderr']);
         self::assertSame('', $r['stdout']);
     }
 

@@ -38,7 +38,8 @@ use SplFileInfo;
  * @phpstan-import-type VerboseResolution from \Depone\Internal\Resolver\AutoloadResolver
  * @phpstan-type Evidence array{class: string, via: 'classmap'|'psr-4'|'psr-0', prefix: string|null, path: string}
  * @phpstan-type RedundantProof array{eager: bool, pure_declaration: bool|null, classes: list<Evidence>}
- * @phpstan-type RedundantEntry array{file: string, line: int, target: string, proof: RedundantProof}
+ * `verified` is set only by the --verify pipeline (ComposerLoaderVerifier::verifyFindings), never by the Analyzer itself.
+ * @phpstan-type RedundantEntry array{file: string, line: int, target: string, proof: RedundantProof, verified?: bool}
  * @phpstan-type FixableEntry array{file: string, line: int, target: string, class: string, expected_path: string, detail: string}
  * @phpstan-type ConflictingEntry array{file: string, line: int, target: string, class: string, loaded_from: string, detail: string}
  * @phpstan-type NeededEntry array{file: string, line: int, target: string, reason: string}
@@ -314,6 +315,7 @@ final class Analyzer
         $fixable = null;
         $uncoveredClass = null;
         $evidence = [];
+        $targetRelative = PathHelper::toRelative($normalizedTarget, $this->repoRoot);
 
         foreach ($classNames as $className) {
             // Checked as $resolution['resolved'] throughout (never split into
@@ -340,7 +342,7 @@ final class Analyzer
                     'class' => $className,
                     'via' => $resolution['via'],
                     'prefix' => $resolution['prefix'],
-                    'path' => PathHelper::toRelative($normalizedTarget, $this->repoRoot),
+                    'path' => $targetRelative,
                 ];
                 continue;
             }

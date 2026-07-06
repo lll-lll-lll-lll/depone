@@ -11,8 +11,7 @@ namespace Depone\Internal\Core;
  * @phpstan-import-type RedundantProof from \Depone\Internal\Core\Analyzer
  * @phpstan-import-type TraceResult from \Depone\Internal\Core\DependencyGraph
  * @phpstan-import-type TracePath from \Depone\Internal\Core\DependencyGraph
- * @phpstan-type VerifyFailure array{file: string, line: int, target: string, class: string|null, loader_path: string|null, reason: string}
- * @phpstan-type VerifyResult array{checked: int, verified: int, mismatches: list<VerifyFailure>, entryVerified: list<bool>}
+ * @phpstan-import-type VerifyFailure from \Depone\Internal\Resolver\ComposerLoaderVerifier
  *
  * @internal
  */
@@ -151,11 +150,13 @@ final class OutputFormatter
      * backward-incompatible way.
      *
      * @param AnalysisResult $result
-     * @param VerifyResult|null $verify Present only when --verify was given;
-     *     adds `verified` to each redundant entry and a top-level `verify`
-     *     block.
+     * @param list<VerifyFailure>|null $mismatches Present only when --verify
+     *     was given: null means --verify was not given; [] means verify ran
+     *     clean. Drives the top-level `verify` block; the per-redundant
+     *     `verified` flag itself comes from the row (annotated by
+     *     ComposerLoaderVerifier::verifyFindings), not from this list.
      */
-    public function formatJson(array $result, ?array $verify = null): string
+    public function formatJson(array $result, ?array $mismatches = null): string
     {
         $document = [
             'schema_version' => 1,
@@ -171,7 +172,7 @@ final class OutputFormatter
                 ],
             ],
             'redundant' => array_map(
-                static fn (array $row, int $index): array => [
+                static fn (array $row): array => [
                     'file' => $row['file'],
                     'line' => $row['line'],
                     'target' => $row['target'],
@@ -188,10 +189,9 @@ final class OutputFormatter
                             $row['proof']['classes']
                         ),
                     ],
-                    ...$verify !== null ? ['verified' => $verify['entryVerified'][$index]] : [],
+                    ...array_key_exists('verified', $row) ? ['verified' => $row['verified']] : [],
                 ],
-                $result['redundant'],
-                array_keys($result['redundant'])
+                $result['redundant']
             ),
             'fixable' => array_map(
                 static fn (array $row): array => [
@@ -234,10 +234,10 @@ final class OutputFormatter
                 ],
                 $result['unresolved']
             ),
-            ...$verify !== null ? [
+            ...$mismatches !== null ? [
                 'verify' => [
-                    'checked' => $verify['checked'],
-                    'verified' => $verify['verified'],
+                    'checked' => count($result['redundant']),
+                    'verified' => count(array_filter(array_column($result['redundant'], 'verified'))),
                     'mismatches' => array_map(
                         static fn (array $failure): array => [
                             'file' => $failure['file'],
@@ -247,7 +247,7 @@ final class OutputFormatter
                             'loader_path' => $failure['loader_path'],
                             'reason' => $failure['reason'],
                         ],
-                        $verify['mismatches']
+                        $mismatches
                     ),
                 ],
             ] : [],
