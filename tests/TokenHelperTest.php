@@ -189,10 +189,17 @@ final class TokenHelperTest extends TestCase
     {
         self::assertSame("line\nbreak", TokenHelper::stripQuotes('"line\nbreak"'));
         self::assertSame("a\tb", TokenHelper::stripQuotes('"a\tb"'));
-        self::assertSame('A', TokenHelper::stripQuotes('"\x41"'));
-        self::assertSame('A', TokenHelper::stripQuotes('"\101"'));
-        self::assertSame("\u{1F600}", TokenHelper::stripQuotes('"\u{1F600}"'));
         self::assertSame('$v', TokenHelper::stripQuotes('"\$v"'));
+    }
+
+    public function testStripQuotesLeavesNumericAndUnicodeEscapesLiteral(): void
+    {
+        // Octal, hex, and \u{...} escapes never appear in an include path, so
+        // the evaluator deliberately does not decode them: they are left
+        // verbatim rather than reproduced.
+        self::assertSame('\x41', TokenHelper::stripQuotes('"\x41"'));
+        self::assertSame('\101', TokenHelper::stripQuotes('"\101"'));
+        self::assertSame('\u{1F600}', TokenHelper::stripQuotes('"\u{1F600}"'));
     }
 
     /**
