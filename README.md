@@ -152,7 +152,9 @@ vendor/bin/depone --format json
 Redundant rows carry `file`, `line`, and `target`; conflicting rows add a
 `detail` string. `--format json` also applies to `--trace`, emitting the trace
 as a JSON object (`target`, `directCallers`, `entrypoints`, `paths`,
-`truncated`).
+`truncated`). Strings that are not valid UTF-8 (expressions lifted from legacy
+non-UTF-8 sources) have their invalid bytes replaced with U+FFFD so the report
+always survives intact.
 
 ## Exit codes
 

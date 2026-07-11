@@ -45,21 +45,24 @@ final class OutputFormatter
     /**
      * Formats the analysis result as JSON.
      *
-     * Machine-readable counterpart of {@see formatSummary()}: it carries the
-     * same sections the text summary prints (redundant, conflicting,
-     * unresolved) and, like the text form, deliberately omits the informational
-     * `edges`. Each entry keeps the internal shape verbatim — redundant rows
-     * have no `detail`, conflicting rows do.
+     * Machine-readable counterpart of {@see formatSummary()}: like the text
+     * form it derives the actionable sections from
+     * {@see Analyzer::ACTIONABLE_CATEGORIES} (so a category added there
+     * appears in both outputs), appends the informational `unresolved`, and
+     * deliberately omits `edges`. Each entry keeps the internal shape
+     * verbatim — redundant rows have no `detail`, conflicting rows do.
      *
      * @param AnalysisResult $result
      */
     public function formatSummaryJson(array $result): string
     {
-        return $this->encode([
-            'redundant' => $result['redundant'],
-            'conflicting' => $result['conflicting'],
-            'unresolved' => $result['unresolved'],
-        ]);
+        $payload = [];
+        foreach (Analyzer::ACTIONABLE_CATEGORIES as $category) {
+            $payload[$category] = $result[$category];
+        }
+        $payload['unresolved'] = $result['unresolved'];
+
+        return $this->encode($payload);
     }
 
     /**
@@ -81,7 +84,14 @@ final class OutputFormatter
      */
     private function encode(array $data): string
     {
-        $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        // JSON_INVALID_UTF8_SUBSTITUTE: `expr`/`detail` strings carry raw
+        // bytes from the analyzed sources, and legacy files are not always
+        // UTF-8. Substituting U+FFFD keeps the report intact instead of
+        // json_encode() failing and silently losing every finding.
+        $json = json_encode(
+            $data,
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+        );
 
         return ($json !== false ? $json : '{}') . PHP_EOL;
     }

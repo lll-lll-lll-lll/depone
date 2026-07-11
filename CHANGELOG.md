@@ -23,6 +23,13 @@ options, exit codes, and command output. PHP classes under `src/` are internal.
   consumption — CI dashboards, editors, `jq`. Exit codes are unchanged and
   `text` remains the default format.
 
+### Fixed
+
+- `--format json` no longer collapses the whole report to `{}` when an analyzed
+  source contains invalid UTF-8 (e.g. a Latin-1 legacy file whose bytes reach
+  the report through an unresolved `expr`): invalid sequences are substituted
+  with U+FFFD and every finding survives.
+
 ## [0.3.0] - 2026-07-11
 
 ### Removed
