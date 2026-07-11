@@ -128,4 +128,30 @@ final class OutputFormatterTest extends TestCase
 
         self::assertSame($trace, $decoded);
     }
+
+    public function testFormatSummaryJsonSubstitutesInvalidUtf8InsteadOfLosingTheReport(): void
+    {
+        // `expr` carries raw bytes from the analyzed source; legacy files are
+        // not always UTF-8. json_encode() fails on such input unless invalid
+        // sequences are substituted — and a failure would silently replace the
+        // whole report with '{}'.
+        $result = [
+            'redundant' => [
+                ['file' => 'public/index.php', 'line' => 5, 'target' => 'src/Bar.php'],
+            ],
+            'conflicting' => [],
+            'unresolved' => [
+                ['file' => 'legacy/a.php', 'line' => 3, 'type' => 'include', 'reason' => 'variable', 'expr' => "\$caf\xE9 . '/x.php'"],
+            ],
+            'edges' => [],
+        ];
+
+        $json = (new OutputFormatter())->formatSummaryJson($result);
+
+        $decoded = json_decode($json, true);
+        self::assertIsArray($decoded);
+        // The findings survive; the invalid byte is replaced with U+FFFD.
+        self::assertSame($result['redundant'], $decoded['redundant']);
+        self::assertSame("\$caf\u{FFFD} . '/x.php'", $decoded['unresolved'][0]['expr']);
+    }
 }
