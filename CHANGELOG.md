@@ -48,6 +48,11 @@ options, exit codes, and command output. PHP classes under `src/` are internal.
   left unreported like any other non-autoloadable target.
 - a require target reached through a symlink is no longer reported as
   `conflicting` when it resolves to the same file autoload would load.
+- the static expression evaluator now matches PHP: double-quoted escapes keep
+  the backslash on sequences PHP does not recognize (so `"a\dir\file.php"` no
+  longer loses characters), binary string literals (`b'...'`) resolve,
+  `define()` is first-wins, and a `require` statement may end with a close tag
+  instead of a semicolon.
 
 ## [0.2.1] - 2026-07-05
 

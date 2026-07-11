@@ -100,6 +100,15 @@ final class TokenHelper
      */
     public static function stripQuotes(string $literal): ?string
     {
+        // A binary string prefix (b'...' / B"...") is just the same string.
+        if (
+            strlen($literal) >= 3
+            && ($literal[0] === 'b' || $literal[0] === 'B')
+            && ($literal[1] === "'" || $literal[1] === '"')
+        ) {
+            $literal = substr($literal, 1);
+        }
+
         $length = strlen($literal);
         if ($length < 2) {
             return null;
@@ -111,9 +120,17 @@ final class TokenHelper
 
         $inner = substr($literal, 1, -1);
 
-        // Double-quoted strings use C-style escape sequences.
         if ($quote === '"') {
-            return stripcslashes($inner);
+            // strtr replaces matched keys and leaves everything else untouched,
+            // so recognized escapes decode while an unknown one (\d, \a, \b)
+            // keeps its backslash — matching PHP, unlike stripcslashes() which
+            // drops it and would collapse "src\Models\User.php". Octal, hex, and
+            // \u{...} escapes do not occur in include paths and stay verbatim.
+            return strtr($inner, [
+                '\\\\' => '\\', '\\"' => '"', '\\$' => '$',
+                '\\n' => "\n", '\\r' => "\r", '\\t' => "\t",
+                '\\v' => "\v", '\\f' => "\f", '\\e' => "\x1b",
+            ]);
         }
 
         // Single-quoted strings only unescape \' and \\.
