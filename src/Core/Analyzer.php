@@ -233,9 +233,10 @@ final class Analyzer
      * - `conflicting`: some declared class is autoloaded from a *different*
      *   file. Deleting the require would silently swap which definition loads,
      *   so this hazard dominates every other outcome.
-     * - null ("needed"): the target declares no types, or some declared class
-     *   is not autoload-reachable back to the target (no matching rule, or a
-     *   rule whose derived path is missing). The require is load-bearing and
+     * - null ("needed"): the target declares no types (or only conditional
+     *   ones, e.g. a polyfill behind a `class_exists` guard), or some declared
+     *   class is not autoload-reachable back to the target (no matching rule, or
+     *   a rule whose derived path is missing). The require is load-bearing and
      *   stays unreported.
      *
      * @return array{category: 'redundant', detail: null}|array{category: 'conflicting', detail: string}|null
@@ -271,7 +272,13 @@ final class Analyzer
             return null;
         }
 
-        $classNames = $classExtractor->extract($content);
+        // The conflict/round-trip logic below must only trust classes the file
+        // declares unconditionally: a class behind an `if (!class_exists())`
+        // guard (a polyfill) does not shadow the real one, so it must not make
+        // the require conflicting. A file that declares only guarded classes has
+        // no unconditional types, so it stays unreported (needed), like any file
+        // that declares nothing.
+        $classNames = $classExtractor->extractTopLevel($content);
         if ($classNames === []) {
             return null;
         }
@@ -281,7 +288,11 @@ final class Analyzer
         foreach ($classNames as $className) {
             $resolved = $resolver->resolve($className);
 
-            if ($resolved !== null && PathHelper::normalize($resolved) !== $normalizedTarget) {
+            if (
+                $resolved !== null
+                && PathHelper::normalize($resolved) !== $normalizedTarget
+                && !$this->sameRealFile($resolved, $normalizedTarget)
+            ) {
                 // A shadowed copy is a hazard however the file is shaped, so
                 // conflicting is reported even for files with side effects.
                 $winner = PathHelper::toRelative(PathHelper::normalize($resolved), $this->repoRoot);
@@ -309,6 +320,20 @@ final class Analyzer
         }
 
         return $allRoundTrip ? ['category' => 'redundant', 'detail' => null] : null;
+    }
+
+    /**
+     * Reports whether two paths point at the same file on disk. Path comparison
+     * elsewhere is lexical (no filesystem access), which flags a false conflict
+     * when an autoload directory or the repo root is reached through a symlink:
+     * the two paths differ as strings but resolve to one inode, and at runtime
+     * the require round-trips. This only ever downgrades a false hazard.
+     */
+    private function sameRealFile(string $a, string $b): bool
+    {
+        $realA = realpath($a);
+
+        return $realA !== false && $realA === realpath($b);
     }
 
     /**

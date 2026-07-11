@@ -35,6 +35,20 @@ options, exit codes, and command output. PHP classes under `src/` are internal.
   now defined once and shared by the exit-code gate and the summary output.
   No behavior change.
 
+### Fixed
+
+- classmap duplicate classes now break ties the way Composer does — the first
+  occurrence wins, over a deterministic scan order — instead of letting the
+  last-scanned file win in raw filesystem order. Previously a require of the
+  shadowed copy could be reported `redundant` (safe to delete) when its true
+  category is `conflicting`.
+- guarded/conditional declarations (a polyfill behind `if (!class_exists())`)
+  are no longer reported as a false `conflicting`: the guard makes the require
+  idempotent, so nothing is shadowed. Such a require is load-bearing, so it is
+  left unreported like any other non-autoloadable target.
+- a require target reached through a symlink is no longer reported as
+  `conflicting` when it resolves to the same file autoload would load.
+
 ## [0.2.1] - 2026-07-05
 
 ### Changed
