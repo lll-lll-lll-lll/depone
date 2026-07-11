@@ -82,7 +82,9 @@ final class FindRedundantCommand extends Command
             if ($fix) {
                 // --fix acts on the redundant findings; it never runs a trace.
                 $report = (new RedundantRequireRemover($repoRoot))->fix($result['redundant']);
-                $this->writeRaw($output, $formatter->formatFixReport($report));
+                $this->writeRaw($output, $asJson
+                    ? $formatter->formatFixReportJson($report)
+                    : $formatter->formatFixReport($report));
                 return self::EXIT_OK;
             }
 

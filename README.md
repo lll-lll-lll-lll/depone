@@ -153,7 +153,10 @@ vendor/bin/depone --format json
 Redundant rows carry `file`, `line`, and `target`; conflicting rows add a
 `detail` string. `--format json` also applies to `--trace`, emitting the trace
 as a JSON object (`target`, `directCallers`, `entrypoints`, `paths`,
-`truncated`).
+`truncated`), and to `--fix`, emitting the fix report as a JSON object
+(`removed`, `skipped`). Strings that are not valid UTF-8 (expressions lifted
+from legacy non-UTF-8 sources) have their invalid bytes replaced with U+FFFD
+so the report always survives intact.
 
 ## Deleting redundant requires (`--fix`)
 
@@ -174,12 +177,17 @@ skipped_require_once=0
 ```
 
 Removal is deliberately conservative: a statement is deleted only when it can be
-located unambiguously and it sits on its own line(s) — nothing but whitespace
-before the `require_once` and after the terminating `;`. A require that shares a
-line with other code or carries a trailing comment is left in place and listed
-under `skipped_require_once` for you to handle by hand. After editing, each file
-is re-parsed and only written back if it still parses. Run `--fix` on a clean
-working tree so the deletions are easy to review and revert.
+located unambiguously, it is a standalone statement, and it sits on its own
+line(s) — nothing but whitespace before the `require_once` and after the
+terminating `;`. A require that shares a line with other code or carries a
+trailing comment is left in place, and so is one whose removal would change the
+surrounding code rather than delete a no-op: the brace-less body of an
+`if`/`else`/loop (deleting it would rebind the next statement as the body) or an
+operand of a larger expression such as `return require_once ...`. All of these
+are listed under `skipped_require_once` for you to handle by hand, as is any
+file that cannot be read or written back. After editing, each file is re-parsed
+and only written back if it still parses. Run `--fix` on a clean working tree so
+the deletions are easy to review and revert.
 
 ## Exit codes
 
@@ -220,9 +228,12 @@ too — the step would stay green even when no analysis happened.
    (`vendor/composer/autoload_*.php` present), depone uses those generated maps:
    they merge the root project with every installed dependency exactly as
    Composer resolves them at runtime, so a class provided by a dependency is
-   recognized too. Without a dumped autoloader it falls back to reading the root
-   `composer.json` directly (`psr-4`, `psr-0`, `classmap`, and `files`,
-   including their `autoload-dev` counterparts).
+   recognized too. Note that reading the dumped maps executes those generated
+   PHP files (nothing else from the repository is ever executed); a corrupt or
+   truncated map is reported as a clean analysis error. Without a dumped
+   autoloader depone falls back to reading the root `composer.json` directly
+   (`psr-4`, `psr-0`, `classmap`, and `files`, including their `autoload-dev`
+   counterparts).
 2. Finds every require/include (excluding `vendor/` and `.git/`) by tokenizing
    each file with `token_get_all()`, and evaluates the path expression with a
    small static evaluator: string literals, concatenation, `__DIR__`/`__FILE__`,

@@ -270,6 +270,36 @@ final class CliApplicationTest extends TestCase
         }
     }
 
+    public function testFixWithJsonFormatEmitsJson(): void
+    {
+        $root = sys_get_temp_dir() . '/depone_fix_json_' . bin2hex(random_bytes(6));
+        mkdir($root . '/src', 0777, true);
+        file_put_contents($root . '/composer.json', '{"autoload":{"psr-4":{"App\\\\":"src/"}}}');
+        file_put_contents(
+            $root . '/src/Foo.php',
+            "<?php\n\ndeclare(strict_types=1);\n\nnamespace App;\n\nclass Foo\n{\n}\n"
+        );
+        file_put_contents(
+            $root . '/app.php',
+            "<?php\n\ndeclare(strict_types=1);\n\nrequire_once __DIR__ . '/src/Foo.php';\n"
+        );
+
+        try {
+            $r = $this->runAppInRoot($root, '--fix', '--format', 'json');
+
+            self::assertSame(0, $r['exitCode']);
+            $decoded = json_decode($r['stdout'], true);
+            self::assertIsArray($decoded);
+            self::assertSame(
+                [['file' => 'app.php', 'line' => 5, 'target' => 'src/Foo.php']],
+                $decoded['removed']
+            );
+            self::assertSame([], $decoded['skipped']);
+        } finally {
+            $this->removeTree($root);
+        }
+    }
+
     private function removeTree(string $dir): void
     {
         $iterator = new \RecursiveIteratorIterator(
