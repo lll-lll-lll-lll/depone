@@ -9,6 +9,8 @@ options, exit codes, and command output. PHP classes under `src/` are internal.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-11
+
 ### Removed
 
 - **Breaking:** dropped the `fixable_require_once` section. Whether a class's
@@ -120,7 +122,8 @@ options, exit codes, and command output. PHP classes under `src/` are internal.
 - `--trace` option: show reverse caller traces (which files require the given
   file, and from which entrypoints).
 
-[Unreleased]: https://github.com/lll-lll-lll-lll/depone/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/lll-lll-lll-lll/depone/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/lll-lll-lll-lll/depone/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/lll-lll-lll-lll/depone/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/lll-lll-lll-lll/depone/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/lll-lll-lll-lll/depone/releases/tag/v0.1.0
