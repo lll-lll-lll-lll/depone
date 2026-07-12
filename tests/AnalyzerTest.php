@@ -7,6 +7,7 @@ namespace Depone\Tests;
 use PHPUnit\Framework\TestCase;
 use Depone\Internal\Core\Analyzer;
 use Depone\Internal\Core\DependencyGraph;
+use Symfony\Component\Filesystem\Filesystem;
 
 final class AnalyzerTest extends TestCase
 {
@@ -326,21 +327,9 @@ final class AnalyzerTest extends TestCase
 
     private function removeTree(string $dir): void
     {
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
-        );
-        foreach ($iterator as $item) {
-            assert($item instanceof \SplFileInfo);
-            // is_link() before is_dir(): a symlink to a directory must be
-            // unlinked, not recursed into or rmdir'd.
-            if ($item->isLink() || !$item->isDir()) {
-                unlink($item->getPathname());
-            } else {
-                rmdir($item->getPathname());
-            }
-        }
-        rmdir($dir);
+        // Filesystem::remove() handles the symlink-to-directory case this
+        // helper used to special-case by hand (unlink, don't recurse).
+        (new Filesystem())->remove($dir);
     }
 
     public function testGuardedPolyfillDeclarationIsNotFalselyConflicting(): void
