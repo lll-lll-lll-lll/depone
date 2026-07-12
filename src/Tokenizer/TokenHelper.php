@@ -21,27 +21,6 @@ final class TokenHelper
     public const REASON_COMPLEX       = 'complex';
 
     /**
-     * Returns whether the token can be part of a class name.
-     * Includes T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED, and T_NAME_RELATIVE on PHP 8.0+.
-     *
-     * @param int|null $id Token ID
-     */
-    public static function isNameToken(?int $id): bool
-    {
-        if ($id === null) {
-            return false;
-        }
-
-        return in_array($id, [
-            T_STRING,
-            T_NS_SEPARATOR,
-            T_NAME_QUALIFIED,
-            T_NAME_FULLY_QUALIFIED,
-            T_NAME_RELATIVE,
-        ], true);
-    }
-
-    /**
      * Skips trivia such as whitespace and comments.
      *
      * @param list<Token> $tokens Token list
@@ -57,70 +36,6 @@ final class TokenHelper
             }
             $cursor++;
         }
-    }
-
-    /**
-     * Splits comma-separated argument tokens.
-     * Nested parentheses are respected, so only top-level commas split arguments.
-     *
-     * @param list<Token> $tokens Token list
-     * @return array<list<Token>> Token lists for each argument
-     */
-    public static function splitArgs(array $tokens): array
-    {
-        $args = [];
-        $current = [];
-        $depth = 0;
-
-        foreach ($tokens as $token) {
-            if ($token->text === '(') {
-                $depth++;
-            } elseif ($token->text === ')') {
-                $depth--;
-            } elseif ($token->text === ',' && $depth === 0) {
-                $args[] = $current;
-                $current = [];
-                continue;
-            }
-            $current[] = $token;
-        }
-
-        if ($current !== []) {
-            $args[] = $current;
-        }
-
-        return $args;
-    }
-
-    /**
-     * Removes surrounding quotes from a string literal and unescapes it.
-     *
-     * @param string $literal Quoted string literal such as "'foo'" or '"bar"'
-     * @return string|null Unquoted string, or null when the literal is malformed
-     */
-    public static function stripQuotes(string $literal): ?string
-    {
-        $length = strlen($literal);
-        if ($length < 2) {
-            return null;
-        }
-        $quote = $literal[0];
-        if (($quote !== "'" && $quote !== '"') || $literal[$length - 1] !== $quote) {
-            return null;
-        }
-
-        $inner = substr($literal, 1, -1);
-
-        // Double-quoted strings use C-style escape sequences.
-        if ($quote === '"') {
-            return stripcslashes($inner);
-        }
-
-        // Single-quoted strings only unescape \' and \\.
-        return strtr($inner, [
-            "\\'" => "'",
-            '\\\\' => '\\',
-        ]);
     }
 
     /**
