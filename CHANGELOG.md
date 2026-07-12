@@ -9,6 +9,12 @@ options, exit codes, and command output. PHP classes under `src/` are internal.
 
 ## [Unreleased]
 
+### Fixed
+
+- `--trace` now recognizes Windows absolute paths (`C:\...`) as absolute, the
+  same fix 0.4.1 applied to require targets: previously such a trace target
+  was resolved relative to the repository root and matched nothing.
+
 ## [0.4.1] - 2026-07-12
 
 ### Fixed
