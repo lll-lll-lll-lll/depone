@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Depone\Internal\Resolver;
 
-use Depone\Internal\Tokenizer\DeclaredClassExtractor;
-use FilesystemIterator;
-use SplFileInfo;
+use Composer\Autoload\ClassLoader;
+use Composer\ClassMapGenerator\ClassMapGenerator;
+use Symfony\Component\Finder\Finder;
 
 /**
  * Resolves class names to file paths from Composer autoload settings.
@@ -18,24 +18,23 @@ use SplFileInfo;
  * (autoload never generated, e.g. a project that has not run `composer install`)
  * the resolver falls back to parsing the root `composer.json` on its own.
  *
+ * Either way the maps are fed into Composer's own {@see ClassLoader}, so the
+ * lookup — classmap first, then PSR-4, then PSR-0, longest prefix wins,
+ * PSR-0 underscore handling — is Composer's runtime implementation, not a
+ * re-derivation of it.
+ *
  * @internal
  */
 final class AutoloadResolver
 {
-    /** @var array<string, list<string>> PSR-4 rules (prefix => directories) */
-    private array $psr4 = [];
-
-    /** @var array<string, list<string>> PSR-0 rules (prefix => directories) */
-    private array $psr0 = [];
-
-    /** @var array<string, string> classmap (class => file) */
-    private array $classmap = [];
+    private ClassLoader $loader;
 
     private string $repoRoot;
 
     public function __construct(string $repoRoot)
     {
         $this->repoRoot = rtrim($repoRoot, '/');
+        $this->loader = new ClassLoader();
         // Prefer Composer's dumped autoloader (root + dependencies, merged as
         // Composer sees them at runtime); fall back to reading composer.json
         // directly when autoload has not been generated.
@@ -52,22 +51,9 @@ final class AutoloadResolver
      */
     public function resolve(string $className): ?string
     {
-        // Strip a leading namespace separator.
-        $className = ltrim($className, '\\');
+        $file = $this->loader->findFile(ltrim($className, '\\'));
 
-        // Prefer classmap entries.
-        if (isset($this->classmap[$className])) {
-            return $this->classmap[$className];
-        }
-
-        // Try PSR-4 resolution first.
-        $file = $this->resolvePsr4($className);
-        if ($file !== null) {
-            return $file;
-        }
-
-        // Fall back to PSR-0 resolution.
-        return $this->resolvePsr0($className);
+        return $file === false ? null : $file;
     }
 
     /**
@@ -94,44 +80,30 @@ final class AutoloadResolver
         }
 
         foreach ($this->requireMap($psr4File) as $prefix => $dirs) {
-            if (!is_string($prefix)) {
-                continue;
-            }
-            foreach ((array) $dirs as $path) {
-                if (is_string($path)) {
-                    $this->psr4[$prefix][] = rtrim($path, '/');
-                }
+            if (is_string($prefix)) {
+                $this->addPsr4($prefix, $this->stringPaths($dirs));
             }
         }
 
         $psr0File = $dir . '/autoload_namespaces.php';
         if (is_file($psr0File)) {
             foreach ($this->requireMap($psr0File) as $prefix => $dirs) {
-                if (!is_string($prefix)) {
-                    continue;
-                }
-                foreach ((array) $dirs as $path) {
-                    if (is_string($path)) {
-                        $this->psr0[$prefix][] = rtrim($path, '/');
-                    }
+                if (is_string($prefix)) {
+                    $this->loader->add($prefix, $this->stringPaths($dirs));
                 }
             }
         }
 
         $classmapFile = $dir . '/autoload_classmap.php';
         if (is_file($classmapFile)) {
+            $classmap = [];
             foreach ($this->requireMap($classmapFile) as $class => $file) {
-                // Composer already applied first-wins when dumping, but keep the
-                // guard so resolve()'s classmap precedence stays authoritative.
                 if (is_string($class) && is_string($file)) {
-                    $this->classmap[$class] ??= $file;
+                    $classmap[$class] = $file;
                 }
             }
+            $this->loader->addClassMap($classmap);
         }
-
-        // Sort longest prefixes first so more specific matches win.
-        uksort($this->psr4, fn ($a, $b) => strlen($b) - strlen($a));
-        uksort($this->psr0, fn ($a, $b) => strlen($b) - strlen($a));
 
         return true;
     }
@@ -169,6 +141,12 @@ final class AutoloadResolver
             return;
         }
 
+        // Classes in classmap directories/files are discovered with Composer's
+        // own generator, so what lands in the map (and which file wins a
+        // duplicate-class tie: the first occurrence, over a deterministic
+        // scan order) matches what `composer dump-autoload` would produce.
+        $generator = new ClassMapGenerator();
+
         // Load both autoload and autoload-dev sections.
         foreach (['autoload', 'autoload-dev'] as $key) {
             if (!isset($composer[$key]) || !is_array($composer[$key])) {
@@ -180,15 +158,8 @@ final class AutoloadResolver
             // PSR-4
             if (isset($autoload['psr-4']) && is_array($autoload['psr-4'])) {
                 foreach ($autoload['psr-4'] as $prefix => $paths) {
-                    if (!is_string($prefix)) {
-                        continue;
-                    }
-                    $pathList = is_array($paths) ? $paths : [$paths];
-                    foreach ($pathList as $path) {
-                        if (!is_string($path)) {
-                            continue;
-                        }
-                        $this->psr4[$prefix][] = $this->repoRoot . '/' . rtrim($path, '/');
+                    if (is_string($prefix)) {
+                        $this->addPsr4($prefix, $this->rootPaths($paths));
                     }
                 }
             }
@@ -196,135 +167,101 @@ final class AutoloadResolver
             // PSR-0
             if (isset($autoload['psr-0']) && is_array($autoload['psr-0'])) {
                 foreach ($autoload['psr-0'] as $prefix => $paths) {
-                    if (!is_string($prefix)) {
-                        continue;
-                    }
-                    $pathList = is_array($paths) ? $paths : [$paths];
-                    foreach ($pathList as $path) {
-                        if (!is_string($path)) {
-                            continue;
-                        }
-                        $this->psr0[$prefix][] = $this->repoRoot . '/' . rtrim($path, '/');
+                    if (is_string($prefix)) {
+                        $this->loader->add($prefix, $this->rootPaths($paths));
                     }
                 }
             }
 
-            // classmap: scan files and collect declared classes.
+            // classmap: scan the listed files and directories for declared classes.
             if (isset($autoload['classmap']) && is_array($autoload['classmap'])) {
                 foreach ($autoload['classmap'] as $path) {
-                    if (!is_string($path)) {
-                        continue;
-                    }
-                    $fullPath = $this->repoRoot . '/' . $path;
-                    if (is_dir($fullPath)) {
-                        $this->scanDirectoryForClasses($fullPath);
-                    } elseif (is_file($fullPath)) {
-                        $this->scanFileForClasses($fullPath);
+                    if (is_string($path)) {
+                        $this->scanClassmapPath($generator, $this->repoRoot . '/' . $path);
                     }
                 }
             }
         }
 
-        // Sort longest prefixes first so more specific matches win.
-        uksort($this->psr4, fn ($a, $b) => strlen($b) - strlen($a));
-        uksort($this->psr0, fn ($a, $b) => strlen($b) - strlen($a));
+        $this->loader->addClassMap($generator->getClassMap()->getMap());
     }
 
     /**
-     * Resolves a class name with PSR-4 rules.
+     * Scans one `classmap` entry into the generator. Directories are handed
+     * over as an explicitly sorted file list: the generator keeps the first
+     * occurrence of a duplicate class (as Composer does), and the sort keeps
+     * that tie-break deterministic instead of raw-filesystem-order dependent.
      */
-    private function resolvePsr4(string $className): ?string
+    private function scanClassmapPath(ClassMapGenerator $generator, string $path): void
     {
-        foreach ($this->psr4 as $prefix => $dirs) {
-            if ($prefix === '' || str_starts_with($className, $prefix)) {
-                $relativeClass = $prefix === '' ? $className : substr($className, strlen($prefix));
-                foreach ($dirs as $dir) {
-                    $file = $dir . '/' . str_replace('\\', '/', $relativeClass) . '.php';
-
-                    if (file_exists($file)) {
-                        return $file;
-                    }
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Resolves a class name with PSR-0 rules.
-     */
-    private function resolvePsr0(string $className): ?string
-    {
-        foreach ($this->psr0 as $prefix => $dirs) {
-            if ($prefix === '' || str_starts_with($className, $prefix)) {
-                foreach ($dirs as $dir) {
-                    // In PSR-0, underscores in the class portion map to directories.
-                    $lastNsPos = strrpos($className, '\\');
-                    if ($lastNsPos !== false) {
-                        $namespace = substr($className, 0, $lastNsPos);
-                        $shortClass = substr($className, $lastNsPos + 1);
-                        $file = $dir . '/' . str_replace('\\', '/', $namespace) . '/'
-                            . str_replace('_', '/', $shortClass) . '.php';
-                    } else {
-                        $file = $dir . '/' . str_replace('_', '/', $className) . '.php';
-                    }
-
-                    if (file_exists($file)) {
-                        return $file;
-                    }
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private function scanDirectoryForClasses(string $dir): void
-    {
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)
-        );
-
-        $files = [];
-        foreach ($iterator as $file) {
-            if (!$file instanceof SplFileInfo) {
-                continue;
-            }
-            if ($file->isFile() && $file->getExtension() === 'php') {
-                $files[] = $file->getPathname();
-            }
-        }
-
-        // RecursiveDirectoryIterator yields entries in raw filesystem order,
-        // which varies by platform and directory history. Sorting first makes
-        // which file wins a same-name classmap collision (see
-        // scanFileForClasses()) deterministic and independent of that order.
-        sort($files);
-
-        foreach ($files as $filePath) {
-            $this->scanFileForClasses($filePath);
-        }
-    }
-
-    /**
-     * Extracts class, interface, trait, and enum names from a file and registers them in the classmap.
-     */
-    private function scanFileForClasses(string $filePath): void
-    {
-        $content = file_get_contents($filePath);
-        if ($content === false) {
+        if (is_dir($path)) {
+            $files = Finder::create()
+                ->files()
+                ->followLinks()
+                ->name('/\.(?:php|inc|hh)$/')
+                ->in($path)
+                ->sortByName();
+        } elseif (is_file($path)) {
+            $files = $path;
+        } else {
             return;
         }
 
-        $classExtractor = new DeclaredClassExtractor();
-        foreach ($classExtractor->extract($content) as $fullClassName) {
-            // Composer's ClassMapGenerator keeps the FIRST occurrence of a
-            // duplicate class name across classmap-scanned files. Ties here
-            // must break the same way, or a require of the file Composer
-            // actually ignores gets classified against the one it doesn't:
-            // conflicting and redundant swap places relative to runtime.
-            $this->classmap[$fullClassName] ??= $filePath;
+        try {
+            $generator->scanPaths($files);
+        } catch (\RuntimeException) {
+            // An unreadable file aborts the scan of this entry; the remaining
+            // classmap entries still load, mirroring the old tolerant scanner.
         }
+    }
+
+    /**
+     * Registers a PSR-4 rule. Composer refuses to dump a non-empty prefix that
+     * does not end with a namespace separator (its ClassLoader rejects them),
+     * so such a rule can never match at runtime and is skipped here too.
+     *
+     * @param list<string> $dirs
+     */
+    private function addPsr4(string $prefix, array $dirs): void
+    {
+        if ($prefix !== '' && !str_ends_with($prefix, '\\')) {
+            return;
+        }
+        $this->loader->addPsr4($prefix, $dirs);
+    }
+
+    /**
+     * Filters a dumped-map value down to its string paths.
+     *
+     * @return list<string>
+     */
+    private function stringPaths(mixed $dirs): array
+    {
+        $paths = [];
+        foreach ((array) $dirs as $path) {
+            if (is_string($path)) {
+                $paths[] = rtrim($path, '/');
+            }
+        }
+
+        return $paths;
+    }
+
+    /**
+     * Converts a composer.json path value (string or list of strings) into
+     * absolute directories under the repository root.
+     *
+     * @return list<string>
+     */
+    private function rootPaths(mixed $paths): array
+    {
+        $absolute = [];
+        foreach (is_array($paths) ? $paths : [$paths] as $path) {
+            if (is_string($path)) {
+                $absolute[] = $this->repoRoot . '/' . rtrim($path, '/');
+            }
+        }
+
+        return $absolute;
     }
 }

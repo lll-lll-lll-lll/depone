@@ -23,6 +23,20 @@ options, exit codes, and command output. PHP classes under `src/` are internal.
   consumption — CI dashboards, editors, `jq`. Exit codes are unchanged and
   `text` remains the default format.
 
+### Changed
+
+- Internal: class-name-to-file resolution is now performed by Composer's own
+  `ClassLoader`, and the composer.json `classmap` fallback scans files with
+  [composer/class-map-generator](https://github.com/composer/class-map-generator)
+  (a new runtime dependency) — the same code `composer dump-autoload` runs —
+  instead of hand-written re-derivations of both. No behavior change.
+- Include/require path expressions are now evaluated with php-parser's
+  constant-expression evaluator instead of a hand-written expression parser.
+  A few more statically-constant expressions resolve than before (numeric
+  literals in concatenations such as `'v' . 1 . '/api.php'`, `\dirname()`,
+  and `define()`'d constants that share a function's name); everything else
+  is unchanged.
+
 ### Fixed
 
 - `--format json` no longer collapses the whole report to `{}` when an analyzed

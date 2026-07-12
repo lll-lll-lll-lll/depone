@@ -17,7 +17,7 @@ use Depone\Internal\Tokenizer\DeclaredClassExtractor;
  *   - fully qualified name assembly
  *   - anonymous class exclusion
  *   - class-name constant (`Foo::class`) exclusion
- *   - duplicate name removal
+ *   - guarded (conditional) declarations excluded from the top-level view
  *   - declaresOnlyTypes: PSR-1 side-effect detection (pure declaration files vs
  *     files that also declare functions/constants or run top-level statements)
  */
@@ -40,7 +40,7 @@ final class DeclaredClassExtractorTest extends TestCase
             }
             PHP;
 
-        self::assertSame(['App\Foo'], $this->extractor->extract($code));
+        self::assertSame(['App\Foo'], $this->extractor->extractTopLevel($code));
     }
 
     public function testExtractsClassWithoutNamespace(): void
@@ -52,7 +52,7 @@ final class DeclaredClassExtractorTest extends TestCase
             }
             PHP;
 
-        self::assertSame(['Foo'], $this->extractor->extract($code));
+        self::assertSame(['Foo'], $this->extractor->extractTopLevel($code));
     }
 
     public function testExtractsInterface(): void
@@ -65,7 +65,7 @@ final class DeclaredClassExtractorTest extends TestCase
             }
             PHP;
 
-        self::assertSame(['App\Foo'], $this->extractor->extract($code));
+        self::assertSame(['App\Foo'], $this->extractor->extractTopLevel($code));
     }
 
     public function testExtractsTrait(): void
@@ -78,7 +78,7 @@ final class DeclaredClassExtractorTest extends TestCase
             }
             PHP;
 
-        self::assertSame(['App\Foo'], $this->extractor->extract($code));
+        self::assertSame(['App\Foo'], $this->extractor->extractTopLevel($code));
     }
 
     public function testExtractsEnum(): void
@@ -91,7 +91,7 @@ final class DeclaredClassExtractorTest extends TestCase
             }
             PHP;
 
-        self::assertSame(['App\Foo'], $this->extractor->extract($code));
+        self::assertSame(['App\Foo'], $this->extractor->extractTopLevel($code));
     }
 
     public function testExtractsMultipleDeclarationsInOneFile(): void
@@ -109,7 +109,7 @@ final class DeclaredClassExtractorTest extends TestCase
             }
             PHP;
 
-        self::assertSame(['App\FooInterface', 'App\Foo'], $this->extractor->extract($code));
+        self::assertSame(['App\FooInterface', 'App\Foo'], $this->extractor->extractTopLevel($code));
     }
 
     public function testExcludesAnonymousClass(): void
@@ -128,7 +128,7 @@ final class DeclaredClassExtractorTest extends TestCase
             }
             PHP;
 
-        self::assertSame(['App\Foo'], $this->extractor->extract($code));
+        self::assertSame(['App\Foo'], $this->extractor->extractTopLevel($code));
     }
 
     public function testExcludesClassNameConstant(): void
@@ -154,32 +154,7 @@ final class DeclaredClassExtractorTest extends TestCase
             }
             PHP;
 
-        self::assertSame(['App\UsesClassConst'], $this->extractor->extract($code));
-    }
-
-    public function testRemovesDuplicateNames(): void
-    {
-        // Declaring the same class twice in one token stream is not valid PHP
-        // to run, but the extractor works purely on tokens and must still
-        // deduplicate rather than reporting the same FQCN twice.
-        $code = <<<'PHP'
-            <?php
-            namespace App;
-
-            if (!class_exists(Foo::class)) {
-                class Foo
-                {
-                }
-            }
-
-            if (!class_exists(\App\Foo::class)) {
-                class Foo
-                {
-                }
-            }
-            PHP;
-
-        self::assertSame(['App\Foo'], $this->extractor->extract($code));
+        self::assertSame(['App\UsesClassConst'], $this->extractor->extractTopLevel($code));
     }
 
     public function testNamespaceResetsBetweenBlocks(): void
@@ -197,7 +172,7 @@ final class DeclaredClassExtractorTest extends TestCase
             }
             PHP;
 
-        self::assertSame(['App\One\Foo', 'App\Two\Bar'], $this->extractor->extract($code));
+        self::assertSame(['App\One\Foo', 'App\Two\Bar'], $this->extractor->extractTopLevel($code));
     }
 
     public function testReturnsEmptyArrayWhenNoDeclarationsPresent(): void
@@ -209,31 +184,19 @@ final class DeclaredClassExtractorTest extends TestCase
             }
             PHP;
 
-        self::assertSame([], $this->extractor->extract($code));
+        self::assertSame([], $this->extractor->extractTopLevel($code));
     }
 
     // -------------------------------------------------------------------------
     // extractTopLevel (unconditional declarations only)
     // -------------------------------------------------------------------------
 
-    public function testExtractTopLevelReturnsUnconditionalDeclarations(): void
+    public function testExtractTopLevelSkipsGuardedDeclaration(): void
     {
-        $code = <<<'PHP'
-            <?php
-            namespace App;
-            class Foo
-            {
-            }
-            PHP;
-
-        self::assertSame(['App\Foo'], $this->extractor->extractTopLevel($code));
-    }
-
-    public function testExtractTopLevelSkipsGuardedDeclarationThatExtractFinds(): void
-    {
-        // A polyfill: the class is declared only when it is missing. extract()
-        // finds it (Composer's classmap would too); extractTopLevel() does not,
-        // because the require does not declare it unconditionally.
+        // A polyfill: the class is declared only when it is missing. Composer's
+        // classmap generator finds it (the guard does not keep it out of the
+        // classmap), but extractTopLevel() does not, because the require does
+        // not declare it unconditionally.
         $code = <<<'PHP'
             <?php
             namespace App;
@@ -244,7 +207,6 @@ final class DeclaredClassExtractorTest extends TestCase
             }
             PHP;
 
-        self::assertSame(['App\Widget'], $this->extractor->extract($code));
         self::assertSame([], $this->extractor->extractTopLevel($code));
     }
 

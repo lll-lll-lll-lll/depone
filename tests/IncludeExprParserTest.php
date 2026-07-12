@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace Depone\Tests;
 
 use PHPUnit\Framework\TestCase;
-use Depone\Internal\Tokenizer\StaticExprParser;
+use Depone\Internal\Tokenizer\IncludeExprParser;
 use Depone\Internal\Tokenizer\Token;
 
 /**
- * Unit tests for StaticExprParser.
+ * Unit tests for IncludeExprParser's static expression evaluation.
  *
  * Covered behavior:
  *   - string literals (single and double quoted)
@@ -18,23 +18,32 @@ use Depone\Internal\Tokenizer\Token;
  *   - user-defined constants ($consts)
  *   - dirname() calls (with and without levels)
  *   - parenthesized grouping
+ *   - define() argument extraction
  *   - unresolvable cases (variables, unknown constants, incomplete expressions, etc.)
  */
-final class StaticExprParserTest extends TestCase
+final class IncludeExprParserTest extends TestCase
 {
     /** Fake file path used in tests. */
     private const FILE = '/project/src/Foo.php';
 
+    private IncludeExprParser $parser;
+
+    protected function setUp(): void
+    {
+        $this->parser = new IncludeExprParser();
+    }
+
     /**
-     * Tokenizes a PHP expression string, passes it to StaticExprParser, and returns parse().
+     * Tokenizes a PHP expression string and evaluates it with evalStaticExpr().
      *
      * @param array<string, string> $consts
      */
     private function parse(string $phpExpr, array $consts = [], string $file = self::FILE): ?string
     {
         $tokens = Token::tokenize('<?php ' . $phpExpr);
+
         // Remove the leading T_OPEN_TAG token.
-        return (new StaticExprParser(array_slice($tokens, 1), $consts, $file))->parse();
+        return $this->parser->evalStaticExpr(array_slice($tokens, 1), $consts, $file);
     }
 
     // -------------------------------------------------------------------------
@@ -94,6 +103,13 @@ final class StaticExprParserTest extends TestCase
         self::assertSame('foobar', $this->parse("'foo'  .  'bar'"));
     }
 
+    public function testConcatenationWithIntegerLiteral(): void
+    {
+        // php-parser's evaluator applies PHP's own concatenation semantics,
+        // so numeric literals concatenate the way they would at runtime.
+        self::assertSame('v1/api.php', $this->parse("'v' . 1 . '/api.php'"));
+    }
+
     // -------------------------------------------------------------------------
     // Magic constants __DIR__ / __FILE__
     // -------------------------------------------------------------------------
@@ -124,6 +140,12 @@ final class StaticExprParserTest extends TestCase
     {
         $file = '/a/b/c/d/e.php';
         self::assertSame('/a/b/c/d', $this->parse('__DIR__', [], $file));
+    }
+
+    public function testOtherMagicConstantsAreUnresolvable(): void
+    {
+        // Only __DIR__ and __FILE__ carry path context; __LINE__ etc. do not.
+        self::assertNull($this->parse("__LINE__ . '/x.php'"));
     }
 
     // -------------------------------------------------------------------------
@@ -168,12 +190,20 @@ final class StaticExprParserTest extends TestCase
         self::assertNull($this->parse('SOME_DIR', []));
     }
 
-    public function testDirnameKeywordInConstsIsIgnoredAsFunctionCall(): void
+    public function testQualifiedConstantIsUnresolvable(): void
     {
-        // Even if 'dirname' exists in $consts, it is treated as a function call
-        // candidate, so the bare identifier still returns null.
-        $consts = ['dirname' => '/should/not/be/used'];
-        self::assertNull($this->parse('dirname', $consts));
+        // Only unqualified names are matched against collected define()s.
+        $consts = ['LIB_DIR' => '/var/www/inc'];
+        self::assertNull($this->parse('Config\LIB_DIR', $consts));
+    }
+
+    public function testConstantShadowingFunctionNameResolvesLikePhp(): void
+    {
+        // Constants and functions live in separate namespaces in PHP, so a
+        // define()'d constant named like a function resolves as a constant —
+        // exactly what the engine would do with a bare `dirname` fetch.
+        $consts = ['dirname' => '/from/const'];
+        self::assertSame('/from/const', $this->parse('dirname', $consts));
     }
 
     // -------------------------------------------------------------------------
@@ -196,6 +226,12 @@ final class StaticExprParserTest extends TestCase
         self::assertSame('/foo/bar', $this->parse("dirname('/foo/bar/baz.php')"));
     }
 
+    public function testFullyQualifiedDirnameResolves(): void
+    {
+        // \dirname() names the same global function.
+        self::assertSame('/project/src', $this->parse('\dirname(__FILE__)'));
+    }
+
     public function testDirnameWithLevels2(): void
     {
         // dirname(__FILE__, 2) -> two levels up
@@ -216,8 +252,8 @@ final class StaticExprParserTest extends TestCase
 
     public function testDirnameWithNegativeLevelReturnsNull(): void
     {
-        // T_LNUMBER is an unsigned integer token, so -1 becomes
-        // T_MINUS + T_LNUMBER and therefore returns null here.
+        // A negative level is not an integer literal but a unary minus
+        // expression, and dirname() itself rejects levels < 1.
         self::assertNull($this->parse('dirname(__FILE__, -1)'));
     }
 
@@ -244,12 +280,6 @@ final class StaticExprParserTest extends TestCase
         self::assertSame('/project/shared', $this->parse("dirname(__FILE__, 2) . '/shared'"));
     }
 
-    public function testDirnameWithoutParenReturnsNull(): void
-    {
-        // Without '(', dirname cannot be parsed as a function call.
-        self::assertNull($this->parse("dirname . '/foo.php'"));
-    }
-
     public function testDirnameWithNoArgumentsReturnsNull(): void
     {
         // dirname() with no arguments returns null.
@@ -258,7 +288,7 @@ final class StaticExprParserTest extends TestCase
 
     public function testDirnameWithNonLnumberLevelReturnsNull(): void
     {
-        // A string level is not T_LNUMBER, so the expression returns null.
+        // A string level is not an integer literal, so the expression returns null.
         self::assertNull($this->parse("dirname('/foo/bar', 'two')"));
     }
 
@@ -295,7 +325,7 @@ final class StaticExprParserTest extends TestCase
 
     public function testEmptyParenReturnsNull(): void
     {
-        // () returns null because parseConcat yields no expression.
+        // () contains no expression.
         self::assertNull($this->parse('()'));
     }
 
@@ -313,24 +343,33 @@ final class StaticExprParserTest extends TestCase
         self::assertNull($this->parse("__DIR__ . '/' . \$file"));
     }
 
+    public function testInterpolatedStringReturnsNull(): void
+    {
+        self::assertNull($this->parse('"$dir/x.php"'));
+    }
+
     public function testUnknownFunctionReturnsNull(): void
     {
         // Function calls other than dirname() are not supported.
         self::assertNull($this->parse('realpath(__DIR__)'));
     }
 
+    public function testNonStringResultReturnsNull(): void
+    {
+        // The expression evaluates, but a path must be a string.
+        self::assertNull($this->parse('true'));
+    }
+
     public function testTrailingTokensReturnNull(): void
     {
-        // Extra trailing tokens mean the full expression cannot be consumed.
+        // Extra trailing tokens mean the snippet is not a single expression.
         // Example: 'foo' 'bar' (two literals with no concatenation operator)
         self::assertNull($this->parse("'foo' 'bar'"));
     }
 
     public function testEmptyTokensReturnNull(): void
     {
-        // Empty token input makes parsePrimary return null, so parse() returns null.
-        $result = (new StaticExprParser([], [], self::FILE))->parse();
-        self::assertNull($result);
+        self::assertNull($this->parser->evalStaticExpr([], [], self::FILE));
     }
 
     public function testIncompleteExpressionTrailingDotReturnsNull(): void
@@ -343,5 +382,69 @@ final class StaticExprParserTest extends TestCase
     {
         // An unknown constant on the right-hand side makes the concat unresolved.
         self::assertNull($this->parse("'prefix/' . UNKNOWN"));
+    }
+
+    // -------------------------------------------------------------------------
+    // parseDefine()
+    // -------------------------------------------------------------------------
+
+    /**
+     * Runs parseDefine() against source whose first define starts at the
+     * given token, mirroring how the analyzer dispatches on T_STRING 'define'.
+     *
+     * @param array<string, string> $consts
+     * @return array{0: string, 1: string}|null
+     */
+    private function define(string $php, array $consts = []): ?array
+    {
+        $tokens = Token::tokenize('<?php ' . $php);
+        foreach ($tokens as $i => $token) {
+            if ($token->id === T_STRING && strtolower($token->text) === 'define') {
+                return $this->parser->parseDefine($tokens, $i, $consts, self::FILE);
+            }
+        }
+        self::fail('no define token found');
+    }
+
+    public function testParseDefineExtractsNameAndValue(): void
+    {
+        self::assertSame(['APP_ROOT', '/app'], $this->define("define('APP_ROOT', '/app');"));
+    }
+
+    public function testParseDefineEvaluatesValueExpression(): void
+    {
+        self::assertSame(
+            ['LIB_DIR', '/project/src/lib'],
+            $this->define("define('LIB_DIR', __DIR__ . '/lib');")
+        );
+    }
+
+    public function testParseDefineResolvesEarlierConstants(): void
+    {
+        self::assertSame(
+            ['MOD_DIR', '/base/mod'],
+            $this->define("define('MOD_DIR', BASE . '/mod');", ['BASE' => '/base'])
+        );
+    }
+
+    public function testParseDefineWithNonLiteralNameReturnsNull(): void
+    {
+        self::assertNull($this->define('define($name, "/app");'));
+    }
+
+    public function testParseDefineWithUnresolvableValueReturnsNull(): void
+    {
+        self::assertNull($this->define("define('APP_ROOT', \$dir);"));
+    }
+
+    public function testParseDefineWithSingleArgumentReturnsNull(): void
+    {
+        self::assertNull($this->define("define('APP_ROOT');"));
+    }
+
+    public function testParseDefineWithNonStringValueReturnsNull(): void
+    {
+        // Only string constants can take part in path resolution.
+        self::assertNull($this->define("define('LEVEL', 3);"));
     }
 }

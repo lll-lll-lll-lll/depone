@@ -197,12 +197,15 @@ too — the step would stay green even when no analysis happened.
    Composer resolves them at runtime, so a class provided by a dependency is
    recognized too. Without a dumped autoloader it falls back to reading the root
    `composer.json` directly (`psr-4`, `psr-0`, `classmap`, and `files`,
-   including their `autoload-dev` counterparts).
+   including their `autoload-dev` counterparts), scanning `classmap` entries
+   with Composer's own class-map generator. Either way, class names are
+   resolved to files by Composer's own `ClassLoader`.
 2. Finds every require/include (excluding `vendor/` and `.git/`) by tokenizing
-   each file with `token_get_all()`, and evaluates the path expression with a
-   small static evaluator: string literals, concatenation, `__DIR__`/`__FILE__`,
-   `define()`'d constants, and `dirname()` calls. Expressions it cannot resolve
-   are reported as `unresolved_include_require` rather than dropped.
+   each file with `token_get_all()`, and evaluates the path expression with
+   php-parser's constant-expression evaluator, extended with what depends on
+   analysis context: `__DIR__`/`__FILE__` of the analyzed file, `define()`'d
+   constants, and `dirname()` calls. Expressions it cannot resolve are
+   reported as `unresolved_include_require` rather than dropped.
 3. For each resolved `require_once` target, parses the file with
    [nikic/php-parser](https://github.com/nikic/PHP-Parser) to find the
    class-like types it declares, and checks each declared class against the
