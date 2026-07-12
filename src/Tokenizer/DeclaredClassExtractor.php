@@ -12,7 +12,6 @@ use PhpParser\Node\Stmt\GroupUse;
 use PhpParser\Node\Stmt\Namespace_;
 use PhpParser\Node\Stmt\Nop;
 use PhpParser\Node\Stmt\Use_;
-use PhpParser\NodeFinder;
 use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitor\NameResolver;
 use PhpParser\Parser;
@@ -22,14 +21,14 @@ use PhpParser\ParserFactory;
  * Extracts fully qualified class/interface/trait/enum names declared in PHP
  * source code, and tells whether a file is a "pure declaration file".
  *
- * extract() and extractTopLevel() deliberately disagree on guarded
- * declarations (`if (!class_exists(...)) { class Foo {} }`): extract()
- * matches Composer's own classmap generator, which finds a class-like
- * anywhere in the file regardless of the guard around it, because that is
- * what actually ends up in the classmap. extractTopLevel() instead answers
- * "which classes does this file declare unconditionally" for the analyzer's
+ * extractTopLevel() deliberately skips guarded declarations
+ * (`if (!class_exists(...)) { class Foo {} }`): it answers "which classes
+ * does this file declare unconditionally" for the analyzer's
  * conflict/round-trip logic, which must not blame a polyfill for shadowing
- * the class it only conditionally stands in for.
+ * the class it only conditionally stands in for. The opposite view — every
+ * class-like anywhere in the file, guard or not, which is what lands in a
+ * classmap — is Composer's own view, and AutoloadResolver gets it from
+ * Composer's class-map generator rather than from this class.
  *
  * @internal
  */
@@ -43,46 +42,12 @@ final class DeclaredClassExtractor
     }
 
     /**
-     * Extracts declared class names (FQCN) from the given source code.
-     * Anonymous classes (`new class { ... }`) are excluded and duplicate names
-     * are removed. Returns an empty array when the source cannot be parsed.
-     *
-     * @return list<string>
-     */
-    public function extract(string $content): array
-    {
-        $stmts = $this->parse($content);
-        if ($stmts === null) {
-            return [];
-        }
-
-        // Resolve names so each declaration carries its fully qualified name.
-        $stmts = (new NodeTraverser(new NameResolver()))->traverse($stmts);
-
-        $names = [];
-        foreach ((new NodeFinder())->findInstanceOf($stmts, ClassLike::class) as $node) {
-            /** @var ClassLike $node */
-            if ($node->name === null) {
-                continue; // anonymous class
-            }
-            $names[] = $node->namespacedName?->toString() ?? $node->name->toString();
-        }
-
-        return array_values(array_unique($names));
-    }
-
-    /**
      * Extracts the FQCNs of class-likes the file declares *unconditionally* at
      * the namespace top level — the same notion of "top level" that
      * {@see onlyDeclarations()} uses (recursing only into namespace and declare
      * bodies), so a class nested in an `if` guard or a function is not counted.
      * Anonymous classes are excluded and duplicates removed. Returns an empty
      * array when the source cannot be parsed.
-     *
-     * Unlike {@see extract()}, which matches Composer's classmap generator by
-     * finding guarded declarations too, this answers what the require actually
-     * declares on its own — the input the analyzer's conflict/round-trip logic
-     * needs.
      *
      * @return list<string>
      */
