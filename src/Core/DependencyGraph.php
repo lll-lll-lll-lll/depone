@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Depone\Internal\Core;
 
 use Depone\Internal\Tokenizer\PathHelper;
+use Symfony\Component\Filesystem\Path;
 
 /**
  * Builds reverse traces (which files require a given file) from require/include edges.
@@ -154,17 +155,13 @@ final class DependencyGraph
     }
 
     /**
-     * Converts a path to a repository-relative path.
+     * Converts a path to a repository-relative path. makeAbsolute() carries
+     * the whole branch the old hand-rolled check did: an absolute path (on
+     * any platform, including `C:\...`) is canonicalized as-is, a relative
+     * one resolves from the repository root.
      */
     private function toRelativePath(string $path): string
     {
-        // Normalize absolute paths as-is.
-        if ($path !== '' && $path[0] === '/') {
-            $normalized = PathHelper::normalize($path);
-        } else {
-            $normalized = PathHelper::normalize($this->repoRoot . '/' . $path);
-        }
-
-        return PathHelper::toRelative($normalized, $this->repoRoot);
+        return PathHelper::toRelative(Path::makeAbsolute($path, $this->repoRoot), $this->repoRoot);
     }
 }

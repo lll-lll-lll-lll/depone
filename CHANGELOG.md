@@ -9,6 +9,34 @@ options, exit codes, and command output. PHP classes under `src/` are internal.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-07-12
+
+### Fixed
+
+- `--trace` now recognizes Windows absolute paths (`C:\...`) as absolute, the
+  same fix 0.4.1 applied to require targets: previously such a trace target
+  was resolved relative to the repository root and matched nothing.
+
+## [0.4.1] - 2026-07-12
+
+### Fixed
+
+- `unresolved_include_require` reasons are now derived from the expression's
+  AST instead of a raw token scan: expressions using the nullsafe operator
+  (`getConfig()?->path()`) are classified `method_call` instead of falling
+  through to `complex`. Reasons for other expressions are unchanged.
+- Windows absolute paths (`C:\...`) in require targets are now recognized as
+  absolute instead of being resolved relative to the requiring file, so
+  targets written with drive letters classify and print correctly.
+- `vendor/bin/depone` no longer fatals when depone is installed as a Composer
+  dependency. The binary loaded the autoloader from `dirname(__DIR__) .
+  '/vendor/autoload.php'`, a path that only exists when depone is the root
+  package, so the documented `composer require --dev depone/depone` install
+  crashed on startup with a missing-`vendor/autoload.php` error. The binary now
+  prefers the autoloader path Composer injects into the generated bin proxy
+  (`$_composer_autoload_path`), falling back to probing the dependency and
+  root-package layouts.
+
 ## [0.4.0] - 2026-07-12
 
 ### Added
@@ -168,7 +196,9 @@ options, exit codes, and command output. PHP classes under `src/` are internal.
 - `--trace` option: show reverse caller traces (which files require the given
   file, and from which entrypoints).
 
-[Unreleased]: https://github.com/lll-lll-lll-lll/depone/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/lll-lll-lll-lll/depone/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/lll-lll-lll-lll/depone/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/lll-lll-lll-lll/depone/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/lll-lll-lll-lll/depone/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/lll-lll-lll-lll/depone/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/lll-lll-lll-lll/depone/compare/v0.2.0...v0.2.1
