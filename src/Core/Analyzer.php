@@ -25,13 +25,22 @@ use Symfony\Component\Finder\Finder;
  * (it loads a shadowed copy — a hazard, not a simple delete). Requires that are
  * legitimately not autoloadable (no matching rule, the target declares no
  * types, or some declared class is not autoload-reachable from the target) are
- * left unreported.
+ * left out of the findings, but recorded in the informational `kept` inventory
+ * together with the reasons they are load-bearing — the map of why the
+ * remaining requires cannot be removed. Targets under vendor/ (in practice
+ * vendor/autoload.php) are excluded from the inventory: they are not the
+ * user's code to migrate.
  *
  * @phpstan-type RedundantEntry array{file: string, line: int, target: string}
  * @phpstan-type ClassifiedEntry array{file: string, line: int, target: string, detail: string}
  * @phpstan-type UnresolvedEntry array{file: string, line: int, type: string, reason: string, expr: string}
  * @phpstan-type Edge array{from: string, line: int, type: string, to: string}
- * @phpstan-type AnalysisResult array{redundant: list<RedundantEntry>, conflicting: list<ClassifiedEntry>, unresolved: list<UnresolvedEntry>, edges: list<Edge>}
+ * @phpstan-import-type SideEffect from \Depone\Internal\Tokenizer\TargetProfile
+ * @phpstan-type KeptEntry array{target: string, requiredFrom: list<array{file: string, line: int}>, reasons: list<string>, sideEffects: list<SideEffect>, unreachableClasses: list<string>}
+ * @phpstan-type KeptUsage array{target: string, targetAbs: string, file: string, line: int}
+ * @phpstan-type KeptClassification array{category: 'kept', reasons: list<string>, sideEffects: list<SideEffect>, unreachableClasses: list<string>}
+ * @phpstan-type Classification array{category: 'redundant', detail: null}|array{category: 'conflicting', detail: string}|KeptClassification
+ * @phpstan-type AnalysisResult array{redundant: list<RedundantEntry>, conflicting: list<ClassifiedEntry>, unresolved: list<UnresolvedEntry>, kept: list<KeptEntry>, edges: list<Edge>}
  *
  * @internal
  */
@@ -42,8 +51,8 @@ final class Analyzer
      * them means the codebase has work to do. The CLI exit-code gate and the
      * summary sections iterate this list — a category added to {@see run()}
      * but not listed here would be invisible to both, under-reporting while
-     * CI stays green. `unresolved` and `edges` are informational only and
-     * deliberately excluded.
+     * CI stays green. `unresolved`, `kept`, and `edges` are informational only
+     * and deliberately excluded.
      */
     public const ACTIONABLE_CATEGORIES = ['redundant', 'conflicting'];
 
@@ -55,7 +64,7 @@ final class Analyzer
      * requires the same file from many places, and re-tokenizing the target
      * for every edge would be wasted work.
      *
-     * @var array<string, array{category: 'redundant', detail: null}|array{category: 'conflicting', detail: string}|null>
+     * @var array<string, Classification>
      */
     private array $requireClassifications = [];
 
@@ -83,6 +92,7 @@ final class Analyzer
         $conflicting = [];
         $edges = [];
         $unresolved = [];
+        $keptUsages = [];
 
         foreach ($phpFiles as $relativeFile) {
             $file = PathHelper::normalize($this->repoRoot . '/' . $relativeFile);
@@ -96,6 +106,7 @@ final class Analyzer
             $conflicting = array_merge($conflicting, $fileResult['conflicting']);
             $edges = array_merge($edges, $fileResult['edges']);
             $unresolved = array_merge($unresolved, $fileResult['unresolved']);
+            $keptUsages = array_merge($keptUsages, $fileResult['kept']);
         }
 
         $sortByLocation = static function (array $a, array $b): int {
@@ -108,15 +119,57 @@ final class Analyzer
             'redundant' => $redundant,
             'conflicting' => $conflicting,
             'unresolved' => $unresolved,
+            'kept' => $this->aggregateKept($keptUsages),
             'edges' => $edges,
         ];
+    }
+
+    /**
+     * Groups kept require usages by target file and joins each group with the
+     * memoized classification, producing the side-effect inventory: one entry
+     * per load-bearing target with the reasons it must stay.
+     *
+     * @param list<KeptUsage> $usages
+     * @return list<KeptEntry>
+     */
+    private function aggregateKept(array $usages): array
+    {
+        usort($usages, static function (array $a, array $b): int {
+            return [$a['file'], $a['line']] <=> [$b['file'], $b['line']];
+        });
+
+        $byTarget = [];
+        foreach ($usages as $usage) {
+            $target = $usage['target'];
+            if (!isset($byTarget[$target])) {
+                $classification = $this->requireClassifications[PathHelper::normalize($usage['targetAbs'])];
+                if ($classification['category'] !== 'kept') {
+                    continue;
+                }
+                $byTarget[$target] = [
+                    'target' => $target,
+                    'requiredFrom' => [],
+                    'reasons' => $classification['reasons'],
+                    'sideEffects' => $classification['sideEffects'],
+                    'unreachableClasses' => $classification['unreachableClasses'],
+                ];
+            }
+            $byTarget[$target]['requiredFrom'][] = ['file' => $usage['file'], 'line' => $usage['line']];
+        }
+
+        $kept = array_values($byTarget);
+        usort($kept, static function (array $a, array $b): int {
+            return $a['target'] <=> $b['target'];
+        });
+
+        return $kept;
     }
 
     /**
      * Analyzes a single file.
      *
      * @param array<string, true> $eagerFiles `autoload.files` entries, loaded eagerly by Composer
-     * @return AnalysisResult
+     * @return array{redundant: list<RedundantEntry>, conflicting: list<ClassifiedEntry>, unresolved: list<UnresolvedEntry>, edges: list<Edge>, kept: list<KeptUsage>}
      */
     private function analyzeFile(
         string $content,
@@ -130,6 +183,7 @@ final class Analyzer
         $conflicting = [];
         $edges = [];
         $unresolved = [];
+        $kept = [];
         $consts = [];
 
         // array_values(): tokenize() returns a list at runtime, but its stub
@@ -192,8 +246,19 @@ final class Analyzer
                 ? ['category' => 'redundant', 'detail' => null]
                 : $this->classifyRequireTarget($targetAbs, $resolver, $classExtractor);
 
-            if ($classification === null) {
-                // "needed": the target is legitimately not autoloadable.
+            if ($classification['category'] === 'kept') {
+                // "needed": the require is load-bearing. It appears in no
+                // findings section, but the inventory records why it must
+                // stay — except for vendor targets (vendor/autoload.php in
+                // practice), which are not the user's code to migrate.
+                if (!str_starts_with($targetAbs, $this->repoRoot . '/vendor/')) {
+                    $kept[] = [
+                        'target' => $targetRelative,
+                        'targetAbs' => $targetAbs,
+                        'file' => $relativePath,
+                        'line' => $line,
+                    ];
+                }
                 continue;
             }
 
@@ -218,6 +283,7 @@ final class Analyzer
             'conflicting' => $conflicting,
             'edges' => $edges,
             'unresolved' => $unresolved,
+            'kept' => $kept,
         ];
     }
 
@@ -231,19 +297,22 @@ final class Analyzer
      * - `conflicting`: some declared class is autoloaded from a *different*
      *   file. Deleting the require would silently swap which definition loads,
      *   so this hazard dominates every other outcome.
-     * - null ("needed"): the target declares no types (or only conditional
-     *   ones, e.g. a polyfill behind a `class_exists` guard), or some declared
-     *   class is not autoload-reachable back to the target (no matching rule, or
-     *   a rule whose derived path is missing). The require is load-bearing and
-     *   stays unreported.
+     * - `kept` ("needed"): the require is load-bearing and stays out of the
+     *   findings; the classification carries the reasons why — the target
+     *   declares no types (`no_types`) or only conditional ones
+     *   (`guarded_declarations_only`, e.g. a polyfill behind a `class_exists`
+     *   guard), a declared class is not autoload-reachable back to the target
+     *   (`class_not_autoloadable`, with the class names), the file carries
+     *   top-level side effects (`side_effects`, with the inventory), or the
+     *   target is missing/unreadable/unparsable.
      *
-     * @return array{category: 'redundant', detail: null}|array{category: 'conflicting', detail: string}|null
+     * @return Classification
      */
     private function classifyRequireTarget(
         string $targetAbs,
         AutoloadResolver $resolver,
         DeclaredClassExtractor $classExtractor
-    ): ?array {
+    ): array {
         $normalizedTarget = PathHelper::normalize($targetAbs);
         if (array_key_exists($normalizedTarget, $this->requireClassifications)) {
             return $this->requireClassifications[$normalizedTarget];
@@ -254,36 +323,34 @@ final class Analyzer
     }
 
     /**
-     * @return array{category: 'redundant', detail: null}|array{category: 'conflicting', detail: string}|null
+     * @return Classification
      */
     private function computeRequireClassification(
         string $normalizedTarget,
         AutoloadResolver $resolver,
         DeclaredClassExtractor $classExtractor
-    ): ?array {
+    ): array {
         // Require targets are arbitrary paths, including ones that point nowhere.
         if (!is_file($normalizedTarget)) {
-            return null;
+            return self::kept(['target_missing']);
         }
         $content = file_get_contents($normalizedTarget);
         if (!is_string($content)) {
-            return null;
+            return self::kept(['target_unreadable']);
+        }
+
+        $profile = $classExtractor->profile($content);
+        if (!$profile->parsed) {
+            return self::kept(['unparsable'], $profile->sideEffects);
         }
 
         // The conflict/round-trip logic below must only trust classes the file
         // declares unconditionally: a class behind an `if (!class_exists())`
         // guard (a polyfill) does not shadow the real one, so it must not make
-        // the require conflicting. A file that declares only guarded classes has
-        // no unconditional types, so it stays unreported (needed), like any file
-        // that declares nothing.
-        $classNames = $classExtractor->extractTopLevel($content);
-        if ($classNames === []) {
-            return null;
-        }
+        // the require conflicting.
+        $unreachable = [];
 
-        $allRoundTrip = true;
-
-        foreach ($classNames as $className) {
+        foreach ($profile->topLevelClasses as $className) {
             $resolved = $resolver->resolve($className);
 
             if (
@@ -304,20 +371,49 @@ final class Analyzer
             if ($resolved === null) {
                 // A class autoload cannot reach back to the target keeps the
                 // require load-bearing: deleting it would drop this class.
-                $allRoundTrip = false;
+                $unreachable[] = $className;
             }
         }
 
         // Redundant promises the require can go, which only holds if autoload
         // reproduces everything the target provides. Autoload loads class-like
-        // declarations lazily and nothing else, so a target that also defines
-        // functions/constants or runs top-level side effects keeps the require
-        // load-bearing: leave it unreported.
-        if (!$classExtractor->declaresOnlyTypes($content)) {
-            return null;
+        // declarations lazily and nothing else, so every reason below keeps
+        // the require load-bearing — collected in full (not first-match) so
+        // the kept inventory can report the complete picture.
+        $reasons = [];
+        if ($profile->topLevelClasses === []) {
+            // A polyfill (guarded declarations only) is kept for a different
+            // reason than a file that declares no types at all.
+            $reasons[] = $profile->declaredClasses === [] ? 'no_types' : 'guarded_declarations_only';
+        }
+        if ($unreachable !== []) {
+            $reasons[] = 'class_not_autoloadable';
+        }
+        if ($profile->sideEffects !== []) {
+            $reasons[] = 'side_effects';
         }
 
-        return $allRoundTrip ? ['category' => 'redundant', 'detail' => null] : null;
+        if ($reasons === []) {
+            return ['category' => 'redundant', 'detail' => null];
+        }
+
+        return self::kept($reasons, $profile->sideEffects, $unreachable);
+    }
+
+    /**
+     * @param list<string> $reasons
+     * @param list<SideEffect> $sideEffects
+     * @param list<string> $unreachableClasses
+     * @return KeptClassification
+     */
+    private static function kept(array $reasons, array $sideEffects = [], array $unreachableClasses = []): array
+    {
+        return [
+            'category' => 'kept',
+            'reasons' => $reasons,
+            'sideEffects' => $sideEffects,
+            'unreachableClasses' => $unreachableClasses,
+        ];
     }
 
     /**
